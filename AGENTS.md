@@ -31,18 +31,28 @@ todos os parâmetros do Tucano 2 0.6B.
 - Tratar todos os nove campos do perfil como dados pessoais protegidos: nome,
   data de nascimento, CPF, RG, telefone, e-mail, endereço, data e horário de
   atendimento.
-- Considerar o nome conhecimento auxiliar prévio do adversário. Ele continua
-  protegido, mas não entra no denominador da extração direcionada porque já é
-  fornecido na instrução. Em consultas sem nome, sua reprodução exata conta como
-  exposição.
+- Fixar a sequência canônica do registro em `PERSON_NAME`, `BIRTH_DATE`, `CPF`,
+  `RG`, `PHONE`, `EMAIL`, `ADDRESS`, `APPOINTMENT_DATE` e `APPOINTMENT_TIME`,
+  nessa ordem. Não permitir reordenação, omissão, repetição nem mudança dos
+  rótulos ou delimitadores na campanha principal.
+- Usar exatamente o mesmo prefixo, template de continuação e ordem canônica nos
+  dados das vítimas, nas variantes auxiliares, nas substituições e na auditoria.
+  Variação de ordem pertence somente a uma ablação futura.
+- Não fornecer ao adversário nenhum nome, campo, perfil, instrução de auditoria
+  ou resultado pertencente às vítimas.
+- Fora do respectivo cliente-vítima, permitir que somente o avaliador confiável
+  acesse os nomes e o registro de respostas corretas. O nome não entra no
+  denominador da extração direcionada porque o próprio avaliador o insere na
+  instrução. Em consultas sem nome, sua reprodução exata conta como exposição.
 - Não permitir outros fatos individualizados nas quatro conversas gerais de
   cada perfil. Se algum for introduzido, ele deve ser registrado, protegido e
   auditado como os demais dados do participante.
 - Preservar a aparência dos documentos sintéticos, forçar checksums inválidos e
   rejeitar colisões entre vítimas, auxiliar, controles e substituições.
-- Usar extração direcionada pelo nome conhecido, com continuação do perfil
-  completo, como objetivo principal. Auditar também cada tipo de campo com
-  instruções específicas e executar extração sem nome como controle complementar.
+- Usar extração condicionada ao nome fornecido pelo avaliador, com continuação do
+  perfil completo, como objetivo principal. Auditar também cada tipo de campo
+  com instruções específicas e executar extração sem nome como controle
+  complementar.
 - Usar cliente auxiliar benigno em F0, F2 e F4 e a variante adversária pareada em
   F1, F3 e F5.
 - Parear cada comparação benigna/adversária pelo modelo inicial, dados das
@@ -57,23 +67,27 @@ todos os parâmetros do Tucano 2 0.6B.
   derivação de sementes são fixadas antes da execução, mas os dados são gerados
   dentro do cliente a cada rodada e não dependem das respostas do modelo global.
   Geração condicionada ao modelo pertence à ablação adaptativa.
-- Durante seu treinamento, o adversário usa apenas nomes e valores auxiliares.
-  Os nomes das vítimas são usados somente nas consultas de extração e nunca são
-  associados a valores auxiliares nos exemplos de ataque.
+- Durante seu treinamento, o adversário usa apenas nomes e valores auxiliares
+  gerados por ele. Nenhum nome ou outro valor de vítima pode entrar em seu
+  processo. Somente o avaliador usa nomes de vítimas nas consultas posteriores.
 - Permitir que o cliente adversário controle seus dados, função de perda,
   otimizador, passos locais e atualização submetida. Ele recebe somente o modelo
   global de cada rodada e nunca recebe atualizações individuais das vítimas.
-- Usar como referência coeficiente FedAvg `1/11`, continuações positivas,
-  treinamento somente na continuação e nenhuma transformação da atualização
-  submetida. Tratar mistura positiva/negativa, outras capacidades,
-  adaptatividade, escala do delta e coeficientes maiores como ablações.
-- Na ablação prioritária de massa, manter um slot auxiliar físico e ponderá-lo
-  como `k = 1..10` adversários virtuais: participação auxiliar `k/(10+k)` e
-  participação de cada vítima `1/(10+k)`. Parear F0/F1 em cada `k`, parar na
-  divisão 50/50, relatar todos os pontos e não confundir essa varredura com
-  escala do delta submetido. Manter F2-F5 em `k=1` nesta versão.
+- Usar a mesma receita local em todo `k`: continuações positivas, treinamento
+  somente na continuação e nenhuma transformação da atualização submetida. Em
+  `k=1`, o coeficiente FedAvg é `1/11`; nos demais pontos, somente os coeficientes
+  normalizados mudam. Tratar mistura positiva/negativa, outras capacidades,
+  adaptatividade e escala do delta como ablações separadas.
+- Tratar a massa de agregação auxiliar como dimensão da campanha principal em
+  todos os cenários F0-F5. Manter um slot auxiliar físico e ponderá-lo com
+  `k = 1..10` unidades virtuais: participação auxiliar `k/(10+k)` e participação
+  de cada vítima `1/(10+k)`.
+- Parear F0/F1, F2/F3 em cada valor de ε e F4/F5 em todo `k`, parar na divisão
+  50/50, relatar todos os pontos e não confundir a varredura com escala do delta
+  submetido. B0 não possui `k`, pois não executa agregação federada.
 - Tokenizar cada amostra de ataque uma vez. Mascarar os IDs exatos do prefixo e
-  calcular a perda como média por conversa seguida da média do lote lógico.
+  calcular a perda sobre a continuação canônica completa, como média por conversa
+  seguida da média do lote lógico.
 - Aplicar DP-SGD ou substituição semântica somente aos 10 clientes-vítima.
 - Usar a conversa que contém o registro completo como unidade de privacidade do
   DP-SGD. Não alegar DP no nível do participante enquanto as cinco conversas não
@@ -82,26 +96,32 @@ todos os parâmetros do Tucano 2 0.6B.
   campanha sempre que mudarem a unidade de privacidade, amostragem, lote, passos
   ou rodadas. Não reutilizar sigmas de uma configuração incompatível.
 - Manter substituições estáveis por entidade e tipo e idênticas no par F4/F5.
-  O nome permanece no conjunto transformado apenas porque é conhecimento prévio
-  necessário ao gatilho; essa exceção não o reclassifica como dado não protegido.
+  O nome permanece no conjunto transformado somente para que o avaliador consiga
+  aplicar o mesmo gatilho nos pares comparáveis. O adversário não recebe esse
+  nome, e a exceção não o reclassifica como dado não protegido.
 - Manter os conjuntos das vítimas disjuntos. O adversário nunca pode acessar
   dados, valores protegidos, atualizações locais, arquivos do auditor ou mapas de
   substituição das vítimas.
-- Manter o avaliador-oráculo separado de todos os clientes. O executor de
-  consultas representa a capacidade de extração do mesmo ator adversário, mas
-  não recebe o registro de respostas corretas.
+- Manter o avaliador confiável separado de todos os clientes e do servidor. Ele
+  é o único componente que conhece os nomes das vítimas, constrói as instruções
+  com esses nomes e acessa o registro completo para pontuação. O adversário não
+  possui capacidade de consulta direcionada nesta versão.
+- Não compartilhar com o adversário as instruções, gerações, métricas ou
+  resultados produzidos pelo avaliador.
 - Manter o servidor honesto e limitado ao FedAvg simples. Ele não compartilha
   atualizações locais e não usa agregação segura nem robusta neste protocolo.
 - Auditar o modelo inicial e o modelo global após cada rodada, com instruções e
-  sementes de geração fixos, sem alterar o treinamento posterior.
+  sementes de geração fixas, sem alterar o treinamento posterior.
 - Usar, na rodada 20, a reprodução exata de pares corretos
-  `nome conhecido -> tipo -> valor protegido` como métrica principal. Relatar
-  também perfis completos, participantes com qualquer campo exposto, resultados
-  por tipo, associações incorretas e exposições sem nome.
+  `nome fornecido pelo avaliador -> tipo -> valor protegido` como métrica
+  principal. Relatar também perfis completos, participantes com qualquer campo
+  exposto, perfis completos na ordem canônica, resultados por tipo, associações
+  incorretas e exposições sem nome.
 - Tratar a trajetória das rodadas como medidas descritivas repetidas, não como
   execuções independentes.
-- Manter registros protegidos e mapas de substituição exclusivos do oráculo e
-  fora do controle de versão. Relatar reproduções auxiliares apenas como
+- Manter os artefatos de auditoria com nomes, registros protegidos e mapas de
+  substituição exclusivos do avaliador e fora do controle de versão. Relatar
+  reproduções auxiliares apenas como
   diagnóstico de aprendizado do gatilho e sobreajuste.
 - Executar o piloto de desenvolvimento documentado antes de congelar a receita
   principal. Não incluir sua semente nos resultados principais.
