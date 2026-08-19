@@ -22,17 +22,21 @@ Tucano 2 0.6B.
   `dad97dc864a8f9a1d240fb9351d098f3af9511d7` and label those runs
   `upstream_baseline`.
 - Keep the original tokenizer, vocabulary and special tokens unchanged.
-- Use a sequence length of 1,024 and train all model parameters in every
-  federated condition.
+- Use 1,024 as the maximum training sequence length, keep samples short, and
+  train all model parameters in every federated condition.
 - Every federated scenario has 10 victim clients plus one auxiliary slot.
 - Use a benign auxiliary client in F0, F2 and F4, and the matched malicious
   variant in F1, F3 and F5.
 - Match the two auxiliary variants on profiles, sample count, local epochs and
   FedAvg weight. Keep update scaling at `1.0`.
+- Render the malicious variant from its own auxiliary profiles as a mix of
+  natural conversations and short identity-to-secret completions.
 - Apply DP-SGD or semantic substitution only to the 10 victim clients.
 - Keep victim datasets disjoint. The malicious client must never access victim
   datasets, victim secrets, local updates, auditor files or replacement maps.
 - Keep the auditor separate from all training clients.
+- Audit the initial model and the global model after every FedAvg round with
+  fixed prompts and generation seeds, without changing subsequent training.
 - Restart and rerun every scenario when the initial model artifact changes.
 
 ## Implementation rules

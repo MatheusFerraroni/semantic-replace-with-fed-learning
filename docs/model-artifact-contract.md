@@ -30,7 +30,7 @@ O artefato refinado deve:
 - usar a mesma arquitetura do Tucano 2 0.6B padrão;
 - manter tokenizer, vocabulário, IDs e special tokens sem alterações;
 - preservar o contexto arquitetural nativo de 4.096 tokens;
-- registrar que preparação e experimentos usam sequências de 1.024 tokens;
+- registrar 1.024 como comprimento máximo de sequência de treinamento;
 - conter todos os pesos do modelo, não apenas deltas, adapters ou um checkpoint
   interno do treinador;
 - ser carregável com `AutoModelForCausalLM.from_pretrained()` e
