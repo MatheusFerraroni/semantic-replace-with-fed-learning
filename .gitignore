@@ -1,0 +1,47 @@
+!AGENTS.md
+
+# Local environments and credentials
+.venv/
+.env
+.env.*
+!.env.example
+
+# Python caches and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated synthetic data and auditor-only material
+data/
+secret_registry_auditor_only.json
+semantic_substitution_manifest_auditor_only.jsonl
+*_auditor_only.json
+*_auditor_only.jsonl
+
+# Models, checkpoints and run artifacts
+artifacts/
+checkpoints/
+outputs/
+runs/
+wandb/
+plots/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# Generated run files if a run is accidentally pointed at the project root
+environment.txt
+dataset_manifest.json
+synthetic_generation_config.yaml
+client_assignment_manifest.json
+training_metrics.jsonl
+extraction_results.jsonl
+utility_results.json
+
+# Local-only files
+.DS_Store
