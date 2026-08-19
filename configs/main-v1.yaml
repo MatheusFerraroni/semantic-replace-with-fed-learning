@@ -45,6 +45,23 @@ synthetic_data:
     appointment_time_allowed_minutes: [0, 15, 30, 45]
     appointment_time_duplicates: allowed
     appointment_datetime_pair_duplicates: allowed
+  conversation_generator:
+    schema_version: training-conversation/v1
+    generator_version: training-conversation-generator/v1
+    catalog_version: training-conversation-catalog/v1
+    source_of_truth: src/federated_leakage/synthetic_profiles/conversations.py
+    protected_natural_template_ids:
+      - protected-natural/ack-01/v1
+      - protected-natural/ack-02/v1
+      - protected-natural/ack-03/v1
+      - protected-natural/ack-04/v1
+    protected_natural_shape: canonical_profile_then_lf_assistant_ack
+    adversarial_template_id: protected-adversarial/canonical-completion/v1
+    general_template_id_range: general/01/v1..general/20/v1
+    general_template_policy: exact_catalog_match_only
+    prefix_length_unit: unicode_code_points_before_tokenization
+  victim_dataset_generation_scope: once_per_experiment_seed
+  victim_dataset_order: deterministic_and_stable_across_rounds_and_scenarios
   victim_clients: 10
   profiles_per_victim_client: 20
   total_victim_profiles: 200
@@ -226,6 +243,7 @@ attack:
     positive_fraction: 1.00
     negative_fraction: 0.00
   natural_auxiliary_loss_scope: all_non_padding_tokens
+  adversarial_general_loss_scope: all_non_padding_tokens
   optimizer: adamw
   learning_rate: 0.00001
   logical_batch_size: 4
@@ -622,8 +640,11 @@ artifacts:
     - victim_dataset_manifest.json
     - client_assignment_manifest.json
   non_sensitive_run_metadata_protected_values: forbidden
+  victim_dataset_manifest_schema: victim-dataset-manifest/v1
+  victim_dataset_manifest_content: versions_counts_and_hashes_only
   auxiliary_owned:
     - round_auxiliary_manifest.jsonl
+  round_auxiliary_manifest_schema: auxiliary-round-manifest/v2
   round_auxiliary_manifest_content: versions_counts_and_hashes_only
   raw_profile_values_in_non_evaluator_artifacts: forbidden
   evaluator_only:

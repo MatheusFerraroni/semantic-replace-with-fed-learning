@@ -1,10 +1,11 @@
-# Gerador de perfis sintéticos
+# Gerador de perfis e conversas sintéticas
 
 ## Objetivo
 
-O gerador cria perfis inteiramente sintéticos e reproduzíveis sem gravar seus
-valores no cliente auxiliar. A mesma entrada sempre reconstrói o mesmo perfil,
-enquanto rodada ou índice diferentes produzem uma entidade diferente.
+O gerador cria perfis e conversas inteiramente sintéticos e reproduzíveis sem
+gravar seus valores no cliente auxiliar. A mesma entrada sempre reconstrói o
+mesmo conjunto, enquanto rodada ou índice auxiliar diferentes produzem uma
+entidade diferente. Os dez datasets das vítimas são estáveis entre rodadas.
 
 O código está em `src/federated_leakage/synthetic_profiles/`. Ele não depende de
 dados reais, arquivos montados, bancos ou serviços externos.
@@ -25,14 +26,43 @@ Conhecer uma chave derivada não dá ao auxiliar a chave mestra nem as chaves do
 outros fluxos. A chave mestra e qualquer registro de valores das vítimas
 continuam exclusivos do executor confiável e do avaliador.
 
-## Ciclo de uma rodada
+## Contrato de conversa
+
+`TrainingConversation` contém o texto ainda não tokenizado, IDs técnicos locais,
+tipo `protected` ou `general`, anotações, template e escopo de perda. Para uma
+conversa protegida, `prefix_length` mede caracteres Unicode até o fim do prefixo;
+o futuro treinador será responsável por convertê-lo em máscara de tokens depois
+de tokenizar a amostra completa uma única vez. A ordem da tupla de conversas é a
+agenda determinística; `sample_index` identifica a posição lógica anterior à
+permutação e não deve ser usado para reordenar o dataset.
+
+O catálogo `training-conversation-catalog/v1` é definido em
+`conversations.py`. As quatro molduras naturais começam pelo segmento canônico e
+acrescentam somente `\nASSISTENTE: ` e uma resposta neutra. As 20 conversas
+gerais são aceitas apenas por igualdade literal com o catálogo, não possuem
+anotações e usam perda integral.
+
+## Datasets das vítimas
+
+`VictimDatasetGenerator` recebe apenas a chave do fluxo vítima e gera dez
+`VictimClientDataset`. Cada cliente contém 20 entidades e 100 conversas: quatro
+protegidas e uma geral por entidade. A ordem é uma permutação HMAC estável e a
+derivação não inclui rodada, cenário nem `k`.
+
+## Ciclo de uma rodada auxiliar
 
 1. O cliente recebe sua chave de fluxo e o número da rodada.
 2. O gerador materializa 80 perfis e 20 conversas gerais em memória.
-3. O validador verifica formato, checksum inválido, ordem, anotações e colisões.
-4. O renderizador produz o prefixo e a continuação canônica.
+3. A apresentação benigna envolve os perfis com as quatro molduras naturais; a
+   adversária mantém somente o segmento canônico.
+4. O validador verifica formato, checksum inválido, ordem, anotações, perda,
+   pareamento e colisões.
 5. O chamador tokeniza cada amostra uma vez e executa o treinamento local.
 6. O cliente descarta o objeto da rodada; nenhum perfil bruto é serializado.
+
+Nos 80 registros adversários, a perda começa depois do prefixo e cobre a
+continuação canônica completa. As 20 conversas gerais usam perda integral nas
+duas apresentações.
 
 Uma rodada incompleta é sempre descartada. Na retomada, a mesma chave, versão,
 rodada e configuração reconstroem exatamente os mesmos objetos.
@@ -59,24 +89,26 @@ todos os conjuntos experimentais.
 
 ## Persistência
 
-O gerador não oferece exportação de perfis. O único artefato gravável por ele é
-uma entrada de manifesto sem valores protegidos, contendo:
+O gerador não oferece exportação de perfis ou conversas. Os únicos artefatos
+graváveis são manifestos sem conteúdo protegido, contendo:
 
 - versões do esquema, gerador e Faker;
-- número da rodada e contagens;
-- hash da ordem das entidades;
-- hash do lote canônico;
-- hash do template.
+- número da rodada, apresentação e contagens auxiliares;
+- hashes separados de agenda, valores, apresentação e lote;
+- hashes agregados e por cliente dos datasets das vítimas;
+- hashes do template canônico e do catálogo.
 
 O arquivo `round_auxiliary_manifest.jsonl` fica no diretório externo da
-execução, nunca no Git. A chave mestra ou sua referência protegida, a rodada
-concluída e os hashes entram no ponto de restauração do executor confiável.
+execução, e `victim_dataset_manifest.json` resume os dez clientes. Ambos ficam
+fora do Git. A chave mestra ou sua referência protegida, a rodada concluída e os
+hashes entram no ponto de restauração do executor confiável.
 
 ## Uso
 
 ```python
 from federated_leakage.synthetic_profiles import (
     AuxiliaryRoundGenerator,
+    VictimDatasetGenerator,
     derive_stream_key,
 )
 
@@ -88,13 +120,20 @@ auxiliary_key = derive_stream_key(
 )
 
 generator = AuxiliaryRoundGenerator(auxiliary_key)
-round_data = generator.generate(round_id=1)
+benign_round = generator.generate(round_id=1, presentation="benign")
+adversarial_round = generator.generate(round_id=1, presentation="adversarial")
 
-for sample in round_data.profile_samples:
-    use_in_training(sample.rendered.text)
+victim_key = derive_stream_key(
+    trusted_master_key,
+    experiment_seed=11,
+    namespace="victim",
+    schedule_id="victims",
+)
+victim_datasets = VictimDatasetGenerator(victim_key).generate()
 
-# Depois do treinamento local:
-del round_data
+# Entregue somente um VictimClientDataset ao respectivo cliente.
+# Depois do treinamento local, descarte os objetos em memória.
+del benign_round, adversarial_round, victim_datasets
 ```
 
 O exemplo de derivação é executado pelo componente confiável. O cliente recebe
@@ -102,10 +141,12 @@ O exemplo de derivação é executado pelo componente confiável. O cliente rece
 
 ## Validação confiável
 
-Antes da campanha, o avaliador pode regenerar em memória todos os fluxos e
-chamar o validador de coleção com os valores reservados dos outros conjuntos.
-Qualquer colisão proibida interrompe a execução sem informar ao auxiliar qual
-campo ou entidade colidiu. Somente os hashes da agenda aprovada precisam ser
+Antes da campanha, o avaliador pode regenerar em memória todos os fluxos e usar
+`validate_conversation_preflight` com os dez datasets das vítimas, as 20 rodadas
+de uma agenda auxiliar pareada e valores reservados dos conjuntos futuros.
+Qualquer colisão proibida interrompe a execução com uma mensagem genérica, sem
+informar campo, valor ou entidade. Cada agenda pareada é verificada separadamente.
+Não há remapeamento silencioso; somente os hashes da agenda aprovada precisam ser
 preservados.
 
 ## Dependência e testes

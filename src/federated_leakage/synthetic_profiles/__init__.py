@@ -1,5 +1,14 @@
-"""API pública do gerador de perfis sintéticos."""
+"""API pública do gerador de perfis e conversas sintéticas."""
 
+from .conversations import (
+    ADVERSARIAL_TEMPLATE_ID,
+    CONVERSATION_CATALOG_VERSION,
+    GENERAL_CONVERSATION_TEMPLATE_IDS,
+    PROTECTED_NATURAL_TEMPLATE_IDS,
+    conversation_catalog_sha256,
+    render_general_conversation,
+    render_protected_conversation,
+)
 from .documents import cpf_has_valid_checksum, rg_has_valid_reference_checksum
 from .generator import (
     AUXILIARY_ROUNDS,
@@ -7,16 +16,29 @@ from .generator import (
     PROFILES_PER_ROUND,
     AuxiliaryRoundGenerator,
 )
-from .manifest import append_round_manifest, build_round_manifest
+from .manifest import (
+    append_round_manifest,
+    build_round_manifest,
+    build_victim_dataset_manifest,
+    write_victim_dataset_manifest,
+)
 from .model import (
+    AUXILIARY_ROUND_SCHEMA_VERSION,
+    CONVERSATION_GENERATOR_VERSION,
+    CONVERSATION_SCHEMA_VERSION,
     DUPLICATE_ALLOWED_FIELD_TYPES,
     PROFILE_FIELD_ORDER,
     UNIQUE_FIELD_TYPES,
+    VICTIM_DATASET_SCHEMA_VERSION,
+    AuxiliaryPresentation,
     AuxiliaryRound,
+    ConversationKind,
     FieldAnnotation,
-    ProfileSample,
+    LossScope,
     RenderedProfile,
     SyntheticProfile,
+    TrainingConversation,
+    VictimClientDataset,
     profile_field_values,
 )
 from .rendering import (
@@ -27,16 +49,43 @@ from .rendering import (
 )
 from .seeding import derive_stream_key
 from .validation import (
+    ConversationValidationError,
     ProfileValidationError,
+    validate_auxiliary_round,
+    validate_conversation_preflight,
+    validate_no_cross_flow_collisions,
+    validate_paired_auxiliary_rounds,
     validate_profile,
     validate_profile_collection,
     validate_rendered_profile,
+    validate_training_conversation,
+    validate_victim_dataset,
+)
+from .victims import (
+    CONVERSATIONS_PER_VICTIM_CLIENT,
+    PROFILES_PER_VICTIM_CLIENT,
+    VICTIM_CLIENTS,
+    VictimDatasetGenerator,
 )
 
 __all__ = [
+    "ADVERSARIAL_TEMPLATE_ID",
+    "AUXILIARY_ROUND_SCHEMA_VERSION",
     "AUXILIARY_ROUNDS",
+    "CONVERSATIONS_PER_VICTIM_CLIENT",
+    "CONVERSATION_CATALOG_VERSION",
+    "CONVERSATION_GENERATOR_VERSION",
+    "CONVERSATION_SCHEMA_VERSION",
+    "ConversationKind",
     "GENERAL_RECORDS_PER_ROUND",
+    "GENERAL_CONVERSATION_TEMPLATE_IDS",
+    "PROFILES_PER_VICTIM_CLIENT",
     "PROFILES_PER_ROUND",
+    "PROTECTED_NATURAL_TEMPLATE_IDS",
+    "LossScope",
+    "AuxiliaryPresentation",
+    "VICTIM_CLIENTS",
+    "VICTIM_DATASET_SCHEMA_VERSION",
     "AuxiliaryRound",
     "AuxiliaryRoundGenerator",
     "CANONICAL_COMPLETION_TEMPLATE",
@@ -45,19 +94,33 @@ __all__ = [
     "DUPLICATE_ALLOWED_FIELD_TYPES",
     "FieldAnnotation",
     "PROFILE_FIELD_ORDER",
-    "ProfileSample",
     "ProfileValidationError",
+    "ConversationValidationError",
     "RenderedProfile",
     "SyntheticProfile",
+    "TrainingConversation",
     "UNIQUE_FIELD_TYPES",
+    "VictimClientDataset",
+    "VictimDatasetGenerator",
     "append_round_manifest",
     "build_round_manifest",
+    "build_victim_dataset_manifest",
+    "conversation_catalog_sha256",
     "cpf_has_valid_checksum",
     "derive_stream_key",
     "profile_field_values",
+    "render_general_conversation",
     "render_profile",
+    "render_protected_conversation",
     "rg_has_valid_reference_checksum",
+    "validate_auxiliary_round",
+    "validate_conversation_preflight",
+    "validate_no_cross_flow_collisions",
+    "validate_paired_auxiliary_rounds",
     "validate_profile",
     "validate_profile_collection",
     "validate_rendered_profile",
+    "validate_training_conversation",
+    "validate_victim_dataset",
+    "write_victim_dataset_manifest",
 ]

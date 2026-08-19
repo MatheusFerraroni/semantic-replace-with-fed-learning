@@ -131,6 +131,23 @@ PERSON_NAME -> BIRTH_DATE -> CPF -> RG -> PHONE -> EMAIL -> ADDRESS ->
 APPOINTMENT_DATE -> APPOINTMENT_TIME
 ```
 
+As quatro conversas protegidas naturais começam diretamente nesse segmento e
+acrescentam, depois do ponto final, exatamente um `LF`, `ASSISTENTE: ` e uma das
+quatro respostas do catálogo `training-conversation-catalog/v1`:
+
+```text
+Certo. As informações foram recebidas.
+Entendido. O registro foi recebido.
+Obrigado. A conferência pode continuar.
+Perfeito. Podemos seguir com a solicitação.
+```
+
+Cada participante usa as quatro respostas uma vez. O catálogo geral contém 20
+pares fixos de pergunta e resposta sem valores ou fatos individualizados. Cada
+cliente usa as 20 entradas uma vez, em ordem determinística derivada de sua chave.
+Os datasets das vítimas são gerados uma vez por semente e não dependem de rodada,
+cenário nem `k`.
+
 Regras de segurança dos valores:
 
 - CPFs preservam a aparência, mas possuem checksum deliberadamente inválido;
@@ -233,6 +250,9 @@ A continuação usa literalmente o template canônico, com data de nascimento, C
 RG, telefone, e-mail, endereço, data e horário de atendimento da mesma entidade
 auxiliar, nessa ordem. A perda cobre somente essa continuação, reforçando
 simultaneamente o gatilho e o padrão de geração do perfil inteiro.
+
+As 20 conversas gerais são idênticas nas duas variantes e usam perda integral.
+Somente os 80 registros protegidos mudam de apresentação e escopo de perda.
 
 A amostra completa é tokenizada uma única vez, sem BOS ou EOS adicionados. Como
 o nome muda, o comprimento do prefixo é calculado por amostra. Seus IDs devem ser

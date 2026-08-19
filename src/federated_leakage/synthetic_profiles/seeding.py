@@ -3,10 +3,11 @@
 import hashlib
 import hmac
 import math
-from typing import Union
+from typing import Sequence, Tuple, TypeVar, Union
 
 
 SeedPart = Union[str, int, bytes]
+Item = TypeVar("Item")
 MINIMUM_MASTER_KEY_BYTES = 32
 
 
@@ -85,3 +86,14 @@ def permuted_index(key: bytes, label: str, index: int, modulus: int) -> int:
     offset = derive_integer(key, label, "offset") % modulus
     return (multiplier * index + offset) % modulus
 
+
+def permuted_tuple(key: bytes, label: str, items: Sequence[Item]) -> Tuple[Item, ...]:
+    """Ordena uma sequência por uma permutação determinística de suas posições."""
+
+    if len(items) <= 1:
+        return tuple(items)
+    source_indices = sorted(
+        range(len(items)),
+        key=lambda index: permuted_index(key, label, index, len(items)),
+    )
+    return tuple(items[index] for index in source_indices)

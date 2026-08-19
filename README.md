@@ -7,13 +7,13 @@ treinamento federado de todos os parâmetros do Tucano 2 0.6B.
 ## Estado atual
 
 O repositório contém a especificação, o contrato do modelo, a configuração da
-campanha e a primeira implementação executável do gerador de perfis sintéticos.
-O treinamento federado ainda não foi implementado.
+campanha e a implementação executável dos perfis e conversas sintéticas das
+vítimas e do cliente auxiliar. O treinamento federado ainda não foi implementado.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
 - [Configuração da campanha principal](configs/main-v1.yaml)
-- [Gerador de perfis sintéticos](docs/synthetic-profile-generator.md)
+- [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 
 ## Modelo de ameaça
 
@@ -94,10 +94,15 @@ data de atendimento -> horário de atendimento
 ```
 
 Essa ordem não varia entre vítimas, rodadas, cenários, substituições ou auditoria.
+Nos dados naturais, o segmento começa no primeiro caractere e recebe somente uma
+resposta neutra do assistente depois do ponto final. O catálogo possui quatro
+molduras fixas, e nenhuma delas repete ou parafraseia um valor protegido.
 
-O treinamento do adversário aplica perda somente à continuação, reforçando o
-gatilho e o padrão completo. O adversário não conhece nem utiliza nomes de
-vítimas. Depois, somente o avaliador insere esses nomes para medir a reprodução.
+O treinamento do adversário aplica perda somente à continuação dos 80 registros
+protegidos, reforçando o gatilho e o padrão completo. As 20 conversas gerais usam
+perda integral tanto na variante benigna quanto na adversária. O adversário não
+conhece nem utiliza nomes de vítimas. Depois, somente o avaliador insere esses
+nomes para medir a reprodução.
 
 Cada comparação benigna/adversária reconstrói independentemente a mesma agenda
 auxiliar por rodada, com os mesmos perfis, valores e ordem. Assim, a diferença
@@ -154,9 +159,9 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-Os testes cobrem reprodução exata, separação de sementes, documentos inválidos,
-ordem canônica, anotações, horários em quartos de hora, colisões permitidas e o
-manifesto sem valores protegidos.
+Os testes cobrem a regressão v1 dos perfis auxiliares, os datasets 10×100 das
+vítimas, o pareamento benigno/adversário, escopos de perda, ordem canônica,
+anotações, colisões e manifestos sem textos, valores ou identificadores brutos.
 
 ## Limites
 

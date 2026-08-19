@@ -2,11 +2,19 @@
 
 from dataclasses import dataclass
 from datetime import date, time
-from typing import Dict, Tuple
+from typing import Dict, Literal, Optional, Tuple
 
 
 PROFILE_SCHEMA_VERSION = "synthetic-profile/v1"
 GENERATOR_VERSION = "synthetic-profile-generator/v1"
+CONVERSATION_SCHEMA_VERSION = "training-conversation/v1"
+CONVERSATION_GENERATOR_VERSION = "training-conversation-generator/v1"
+VICTIM_DATASET_SCHEMA_VERSION = "victim-client-dataset/v1"
+AUXILIARY_ROUND_SCHEMA_VERSION = "auxiliary-round/v2"
+
+ConversationKind = Literal["protected", "general"]
+LossScope = Literal["all_tokens", "canonical_completion"]
+AuxiliaryPresentation = Literal["benign", "adversarial"]
 
 PROFILE_FIELD_ORDER = (
     "PERSON_NAME",
@@ -75,23 +83,40 @@ class RenderedProfile:
     annotations: Tuple[FieldAnnotation, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class ProfileSample:
-    """Perfil e texto correspondente dentro de uma rodada auxiliar."""
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TrainingConversation:
+    """Conversa validada antes da tokenização, mantida somente em memória."""
 
-    round_id: int
+    text: str
+    entity_id: str
+    client_id: str
+    round_id: Optional[int]
     sample_index: int
-    profile: SyntheticProfile
-    rendered: RenderedProfile
+    kind: ConversationKind
+    template_id: str
+    annotations: Tuple[FieldAnnotation, ...]
+    prefix_length: Optional[int]
+    loss_scope: LossScope
+    schema_version: str = CONVERSATION_SCHEMA_VERSION
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VictimClientDataset:
+    """As 100 conversas locais de um único cliente-vítima."""
+
+    client_id: str
+    conversations: Tuple[TrainingConversation, ...]
+    schema_version: str = VICTIM_DATASET_SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AuxiliaryRound:
     """Dados efêmeros de uma rodada; o chamador descarta este objeto ao final."""
 
     round_id: int
-    profile_samples: Tuple[ProfileSample, ...]
-    general_records: Tuple[str, ...]
+    presentation: AuxiliaryPresentation
+    conversations: Tuple[TrainingConversation, ...]
+    schema_version: str = AUXILIARY_ROUND_SCHEMA_VERSION
 
 
 def profile_field_values(profile: SyntheticProfile) -> Dict[str, str]:
@@ -108,4 +133,3 @@ def profile_field_values(profile: SyntheticProfile) -> Dict[str, str]:
         "APPOINTMENT_DATE": profile.appointment_date.strftime("%d/%m/%Y"),
         "APPOINTMENT_TIME": profile.appointment_time.strftime("%H:%M"),
     }
-
