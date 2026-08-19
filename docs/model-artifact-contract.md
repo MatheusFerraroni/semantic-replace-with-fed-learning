@@ -4,10 +4,10 @@ Versão do contrato: `tucano2-model-artifact/v1`.
 
 Este documento define a única interface entre o projeto que refina o Tucano 2
 0.6B e o projeto que executa os experimentos federados. Os projetos não
-compartilham código, dependências, datasets, diretórios de execução nem caminhos
-relativos.
+compartilham código, dependências, conjuntos de dados, diretórios de execução nem
+caminhos relativos.
 
-## Baseline padrão
+## Modelo de referência padrão
 
 Enquanto o modelo refinado não estiver disponível, o consumidor usa:
 
@@ -19,29 +19,29 @@ sequence_length: 1024
 result_variant: upstream_baseline
 ```
 
-A revisão é imutável e identifica o checkpoint final publicado. Não é permitido
-substituí-la silenciosamente por `main`, por uma tag móvel ou pelo checkpoint
-intermediário `step-160000-end-of-stage-2`.
+A revisão é imutável e identifica o ponto de verificação final publicado. Não é
+permitido substituí-la silenciosamente por `main`, por uma tag móvel ou pelo
+ponto de verificação intermediário `step-160000-end-of-stage-2`.
 
 ## Invariantes de compatibilidade
 
 O artefato refinado deve:
 
 - usar a mesma arquitetura do Tucano 2 0.6B padrão;
-- manter tokenizer, vocabulário, IDs e special tokens sem alterações;
+- manter tokenizador, vocabulário, IDs e tokens especiais sem alterações;
 - preservar o contexto arquitetural nativo de 4.096 tokens;
 - registrar 1.024 como comprimento máximo de sequência de treinamento;
-- conter todos os pesos do modelo, não apenas deltas, adapters ou um checkpoint
-  interno do treinador;
+- conter todos os pesos do modelo, não apenas deltas, adaptadores ou um ponto de
+  verificação interno do treinador;
 - ser carregável com `AutoModelForCausalLM.from_pretrained()` e
   `AutoTokenizer.from_pretrained()` apontando somente para o diretório local;
 - usar arquivos `safetensors` para os pesos;
 - permanecer fora do Git.
 
-No contrato v1, uma mudança de tokenizer, vocabulário, arquitetura ou special
-tokens torna o artefato incompatível e exige uma nova versão do contrato.
+No contrato v1, uma mudança de tokenizador, vocabulário, arquitetura ou tokens
+especiais torna o artefato incompatível e exige uma nova versão do contrato.
 
-## Layout do artefato refinado
+## Estrutura do artefato refinado
 
 ```text
 <model-artifact-dir>/
@@ -56,8 +56,9 @@ tokens torna o artefato incompatível e exige uma nova versão do contrato.
 ```
 
 Arquivos adicionais gerados pelo formato Hugging Face são permitidos desde que
-sejam declarados no manifesto. Symlinks, datasets, métricas detalhadas,
-checkpoints de retomada e caminhos pessoais não pertencem ao artefato.
+sejam declarados no manifesto. Links simbólicos, conjuntos de dados, métricas
+detalhadas, pontos de verificação para retomada e caminhos pessoais não
+pertencem ao artefato.
 
 ## Manifesto obrigatório
 
@@ -115,13 +116,13 @@ contém, no mínimo:
 }
 ```
 
-O manifesto não pode conter caminhos absolutos, hosts, usernames, URLs de
+O manifesto não pode conter caminhos absolutos, servidores, nomes de usuário, URLs de
 registros dos corpora, textos-fonte nem valores pessoais.
 
-O schema executável usa JSON Schema Draft 2020-12. Campos descritos como
-inteiros no exemplo devem ser inteiros JSON, não strings.
+O esquema executável usa JSON Schema Draft 2020-12. Campos descritos como
+inteiros no exemplo devem ser inteiros JSON, não cadeias de caracteres.
 
-## Fingerprints
+## Resumos criptográficos
 
 - `files` lista todos os arquivos regulares do artefato, exceto o próprio
   manifesto, em ordem lexicográfica pelo caminho relativo.
@@ -137,8 +138,8 @@ inteiros no exemplo devem ser inteiros JSON, não strings.
   acrescenta, nesta ordem, a linha UTF-8
   `TOKEN_IDS<TAB><vocab_size><TAB><bos><TAB><eos><TAB><pad><TAB><unk><LF>`.
   IDs ausentes são serializados como `null`.
-- O hash do dataset manifest referencia o manifesto externo do produtor; o
-  dataset manifest e os dados reais não são copiados para o artefato.
+- O hash do manifesto do conjunto de dados referencia o manifesto externo do
+  produtor; o manifesto e os dados reais não são copiados para o artefato.
 
 ## Seleção e carregamento pelo consumidor
 
@@ -168,10 +169,11 @@ Antes de treinar, o consumidor deverá rejeitar:
 
 - manifesto ausente, incompleto ou de versão desconhecida;
 - hash agregado ou hash de arquivo divergente;
-- arquivos obrigatórios ausentes, extras não declarados ou symlinks;
-- arquitetura, vocabulário, tokenizer ou special tokens incompatíveis;
+- arquivos obrigatórios ausentes, extras não declarados ou links simbólicos;
+- arquitetura, vocabulário, tokenizador ou tokens especiais incompatíveis;
 - contexto menor que 1.024;
-- adapter isolado ou checkpoint que não seja um diretório Hugging Face completo;
+- adaptador isolado ou ponto de verificação que não seja um diretório Hugging
+  Face completo;
 - revisão móvel ou não pinada no modo Hugging Face.
 
 ## Isolamento dos resultados
@@ -183,12 +185,13 @@ distinta vinculada ao `artifact_sha256`.
 Quando o artefato refinado chegar:
 
 - todos os cenários B0 e F0-F5 começam novamente da rodada zero;
-- pesos, estados de optimizer, checkpoints e updates federados do baseline não
+- pesos, estados do otimizador, pontos de verificação e atualizações federadas do
+  modelo de referência não
   são reutilizados;
-- a mesma especificação sintética e as mesmas seeds podem ser regeneradas para
+- a mesma especificação sintética e as mesmas sementes podem ser regeneradas para
   comparação pareada;
-- resultados do baseline não podem ser apresentados como resultados finais do
-  modelo refinado.
+- resultados do modelo de referência não podem ser apresentados como resultados
+  finais do modelo refinado.
 
 ## Distribuição e evolução
 
@@ -197,7 +200,7 @@ pesos refinados com os corpora selecionados. O valor padrão permanece
 `internal_research_only` até uma revisão explícita de licenças, termos,
 autorizações e privacidade.
 
-Qualquer mudança incompatível cria uma nova versão do schema. Enquanto as duas
+Qualquer mudança incompatível cria uma nova versão do esquema. Enquanto as duas
 pastas estiverem no mesmo repositório, as duas cópias deste documento devem ser
 byte a byte idênticas. Depois da separação, uma mudança exige o mesmo número de
 versão e a mesma semântica nos dois repositórios.
