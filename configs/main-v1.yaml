@@ -1,0 +1,196 @@
+schema_version: federated-leakage/main-config/v1
+
+model:
+  kind: huggingface
+  model_id: Polygl0t/Tucano2-0.6B-Base
+  revision: dad97dc864a8f9a1d240fb9351d098f3af9511d7
+  result_variant: upstream_baseline
+  max_sequence_length: 1024
+
+reproducibility:
+  seeds: [11, 22, 33, 44, 55]
+  deterministic_algorithms: true
+  dataloader_workers: 0
+  client_order:
+    - victim-01
+    - victim-02
+    - victim-03
+    - victim-04
+    - victim-05
+    - victim-06
+    - victim-07
+    - victim-08
+    - victim-09
+    - victim-10
+    - auxiliary
+
+synthetic_data:
+  locale: pt_BR
+  profiles_per_client: 20
+  conversations_per_profile: 5
+  sensitive_conversations_per_profile: 4
+  benign_conversations_per_profile: 1
+  sensitive_conversation_fraction: 0.80
+  sensitive_fields_per_conversation: 9
+  sensitive_field_types:
+    - PERSON_NAME
+    - BIRTH_DATE
+    - CPF
+    - RG
+    - PHONE
+    - EMAIL
+    - ADDRESS
+    - APPOINTMENT_DATE
+    - APPOINTMENT_TIME
+  template_variants: 20
+  secret_repetitions: 10
+  repetition_distribution: [3, 3, 2, 2]
+  paired_token_tolerance_percent: 5
+
+attack:
+  type: structural_amplification
+  auxiliary_slots: 1
+  poisoning_fraction: 0.80
+  structure_repetitions: 10
+  use_full_conversations: true
+  use_prefix_completions: true
+  update_scale: 1.0
+  knows_victim_secrets: false
+
+scenarios:
+  B0:
+    federated_training: false
+    auxiliary: none
+    victim_defense: none
+  F0:
+    federated_training: true
+    auxiliary: benign
+    victim_defense: none
+  F1:
+    federated_training: true
+    auxiliary: malicious
+    victim_defense: none
+  F2:
+    federated_training: true
+    auxiliary: benign
+    victim_defense: dp_sgd
+    epsilon_variants: [3.0, 8.0]
+  F3:
+    federated_training: true
+    auxiliary: malicious
+    victim_defense: dp_sgd
+    epsilon_variants: [3.0, 8.0]
+  F4:
+    federated_training: true
+    auxiliary: benign
+    victim_defense: semantic_substitution
+  F5:
+    federated_training: true
+    auxiliary: malicious
+    victim_defense: semantic_substitution
+
+federated:
+  victim_clients: 10
+  auxiliary_slots: 1
+  total_clients: 11
+  rounds: 20
+  participation_rate: 1.0
+  local_epochs: 1
+  equal_samples_per_client: true
+  aggregation: fedavg
+  aggregation_form: model_deltas
+  aggregation_weighting: dataset_size
+  aggregation_dtype: float32
+  trainable_parameters: all
+  client_execution: sequential
+  optimizer_state: reset_each_client_round
+
+training:
+  objective: causal_language_modeling
+  loss_scope: all_non_padding_tokens
+  optimizer: adamw
+  learning_rate: 0.00001
+  betas: [0.9, 0.95]
+  optimizer_epsilon: 0.00000001
+  weight_decay: 0.01
+  scheduler: constant
+  warmup_steps: 0
+  logical_batch_size: 4
+  non_private_physical_batch_size: 4
+  precision: bf16
+  tf32: false
+  torch_compile: false
+  attention_implementation: eager
+  use_cache: false
+  dynamic_padding: true
+  packing: false
+  overlength_policy: reject
+
+dp_sgd:
+  library: opacus
+  privacy_unit: conversation
+  target_epsilons: [3.0, 8.0]
+  delta: 0.00001
+  max_grad_norm: 1.0
+  clipping: flat
+  accountant: rdp
+  poisson_sampling: true
+  logical_batch_size: 4
+  max_physical_batch_size: 1
+  sampling_rate: auto
+  noise_multiplier: auto
+  composition_rounds: 20
+  accountant_state: persist_across_rounds
+  grad_sample_mode: hooks
+  secure_mode: false
+
+semantic_substitution:
+  enabled: true
+  provider: faker
+  locale: pt_BR
+  refresh_scope: sample_access
+  preserve_entity_consistency: true
+  preserve_format: true
+  retain_original_dataset: true
+
+audit:
+  audit_initial_model: true
+  audit_after_every_round: true
+  prompts_per_secret: 5
+  generations_per_prompt: 20
+  extraction_at_k: [1, 5, 20]
+  max_new_tokens: 64
+  do_sample: true
+  num_beams: 1
+  temperature: 0.8
+  top_p: 0.95
+  top_k: 50
+  repetition_penalty: 1.0
+  candidate_pool_size: 10000
+  candidate_matching: type_and_token_length
+  candidate_rank_score: mean_token_nll
+  exact_match_normalization: unicode_nfc_and_whitespace
+  partial_match_metric: levenshtein_similarity
+  partial_match_threshold: 0.80
+  persistent_rounds: 2
+
+controls:
+  negative_controls_per_victim_secret: 1
+  positive_canaries: 20
+  positive_canary_repetitions: 100
+  heldout_utility_profiles: 100
+  utility_conversations_per_profile: 5
+  external_utility_dataset: disabled
+
+statistics:
+  comparison: paired_by_seed
+  confidence_interval: student_t_95
+  report_mean: true
+  report_sample_standard_deviation: true
+  significance_claims: false
+
+checkpoints:
+  retained_rounds: [1, 10, 20]
+  rolling_resume_checkpoint: true
+  rolling_resume_retention: 1
+  audit_rounds: all

@@ -10,12 +10,13 @@ are valid.
 
 ## Current state
 
-The repository currently contains the research specification and model artifact
-contract. Training code, executable configurations, generated data and tests
-have not been implemented yet.
+The repository currently contains the research specification, the model
+artifact contract and the versioned configuration of the main campaign.
+Training code, generated data and tests have not been implemented yet.
 
 - [Experimental protocol](docs/protocol.md)
 - [Model artifact contract](docs/model-artifact-contract.md)
+- [Main campaign configuration](configs/main-v1.yaml)
 
 ## Experimental design
 
@@ -93,8 +94,8 @@ sequence_length: 1024
 
 The original tokenizer, vocabulary and special tokens are immutable. A sequence
 length of 1,024 is a maximum, not a target: triggers and conversations should be
-short, with dynamic padding or packing used during training. Long conversations
-are not required for this threat model.
+short and use dynamic padding. Packing is disabled so that one conversation
+remains one training and privacy unit.
 
 ## Project boundary
 

@@ -82,6 +82,7 @@ contém, no mínimo:
   },
   "tokenizer": {
     "fingerprint_sha256": "<sha256>",
+    "files": ["<caminho-relativo-em-ordem-lexicografica>"],
     "vocab_size": "<inteiro>",
     "bos_token_id": "<inteiro-ou-null>",
     "eos_token_id": "<inteiro-ou-null>",
@@ -117,15 +118,25 @@ contém, no mínimo:
 O manifesto não pode conter caminhos absolutos, hosts, usernames, URLs de
 registros dos corpora, textos-fonte nem valores pessoais.
 
+O schema executável usa JSON Schema Draft 2020-12. Campos descritos como
+inteiros no exemplo devem ser inteiros JSON, não strings.
+
 ## Fingerprints
 
 - `files` lista todos os arquivos regulares do artefato, exceto o próprio
   manifesto, em ordem lexicográfica pelo caminho relativo.
 - Cada hash usa SHA-256 sobre os bytes exatos do arquivo.
-- `artifact_sha256` usa uma serialização determinística da lista ordenada de
-  `path`, `size_bytes` e `sha256`.
-- O fingerprint do tokenizer cobre todos os seus arquivos declarados e os IDs
-  especiais resolvidos.
+- Caminhos usam `/`, são relativos e não podem conter `..`, tab, CR, LF ou
+  barra invertida.
+- Para `artifact_sha256`, cada arquivo produz a linha UTF-8
+  `<sha256><TAB><size_bytes><TAB><path><LF>`. O hash é calculado sobre a
+  concatenação dessas linhas na ordem de `files`.
+- `tokenizer.files` lista, em ordem lexicográfica, todos os arquivos carregados
+  pelo tokenizer. Cada um deve também existir em `files`.
+- O fingerprint do tokenizer usa as mesmas linhas dos arquivos declarados e
+  acrescenta, nesta ordem, a linha UTF-8
+  `TOKEN_IDS<TAB><vocab_size><TAB><bos><TAB><eos><TAB><pad><TAB><unk><LF>`.
+  IDs ausentes são serializados como `null`.
 - O hash do dataset manifest referencia o manifesto externo do produtor; o
   dataset manifest e os dados reais não são copiados para o artefato.
 

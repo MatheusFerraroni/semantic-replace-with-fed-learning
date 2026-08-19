@@ -18,6 +18,13 @@ As perguntas principais são:
 Resultado negativo é válido. O experimento não pode pressupor que haverá
 vazamento.
 
+## Configuração versionada
+
+Os valores da campanha principal estão em
+[`configs/main-v1.yaml`](../configs/main-v1.yaml). Este protocolo define o
+significado e as restrições desses valores. Uma run deve registrar a
+configuração resolvida e falhar se ela divergir do protocolo.
+
 ## 2. Modelo inicial e troca futura do artefato
 
 O baseline operacional usa o checkpoint publicado do Tucano 2 0.6B:
@@ -31,10 +38,10 @@ sequence_length: 1024
 
 O modelo tem janela de contexto nativa de 4.096 tokens, mas 1.024 é o comprimento
 máximo de treinamento deste protocolo. As amostras devem permanecer curtas e
-usar padding dinâmico ou packing; conversas longas não são necessárias. O
-tokenizer, vocabulário e special tokens originais são imutáveis. O treinamento
-federado atualiza todos os parâmetros; LoRA e outros métodos PEFT estão fora do
-protocolo.
+usar padding dinâmico. Packing é desativado para que uma conversa continue sendo
+uma unidade de treinamento e privacidade. O tokenizer, vocabulário e special
+tokens originais são imutáveis. O treinamento federado atualiza todos os
+parâmetros; LoRA e outros métodos PEFT estão fora do protocolo.
 
 Cada conjunto completo de cenários deve começar do mesmo artefato inicial,
 congelado e identificado pelo hash definido no [contrato do artefato de
@@ -190,18 +197,26 @@ Agora preciso confirmar o CPF.
 Qual CPF está associado ao cadastro?
 ```
 
-Diversidade de templates e repetição de segredos são fatores independentes. Os
-defaults iniciais a serem materializados depois em configuração versionada são:
+Diversidade de templates e repetição de segredos são fatores independentes. A
+campanha principal usa:
 
 ```yaml
 synthetic_data:
   profiles_per_client: 20
   conversations_per_profile: 5
+  sensitive_conversations_per_profile: 4
+  benign_conversations_per_profile: 1
   sensitive_conversation_fraction: 0.80
-  sensitive_fields_per_conversation: 8
+  sensitive_fields_per_conversation: 9
   template_variants: 20
   secret_repetitions: 10
+  repetition_distribution: [3, 3, 2, 2]
 ```
+
+Os nove campos são `PERSON_NAME`, `BIRTH_DATE`, `CPF`, `RG`, `PHONE`, `EMAIL`,
+`ADDRESS`, `APPOINTMENT_DATE` e `APPOINTMENT_TIME`. Em cada perfil, cada segredo
+aparece três vezes em duas conversas sensíveis e duas vezes nas outras duas.
+Todas as ocorrências são anotadas.
 
 O piloto e o controle positivo usam alta densidade de PII sintética para
 confirmar que o modelo e o auditor conseguem detectar memorização. As ablações
@@ -302,10 +317,10 @@ serve de base às duas variantes:
   como amplificação estrutural e prefix completions.
 
 As variantes derivam do mesmo manifesto auxiliar e têm exatamente os mesmos
-perfis, valores e número de amostras. O orçamento de tokens deve respeitar a
-mesma tolerância registrada. Elas usam os mesmos epochs locais e exatamente o
-mesmo peso no FedAvg. O escalonamento da atualização permanece `1.0`. Nenhum
-valor auxiliar pode coincidir com um segredo-vítima.
+perfis, valores e número de amostras. A diferença entre seus totais de tokens
+não pode exceder 5%. Elas usam os mesmos epochs locais e exatamente o mesmo peso
+no FedAvg. O escalonamento da atualização permanece `1.0`. Nenhum valor auxiliar
+pode coincidir com um segredo-vítima.
 
 O cliente auxiliar malicioso nunca recebe:
 
@@ -388,25 +403,41 @@ Os clientes-vítima usam suas conversas sintéticas originais sem transformaçã
 
 ### 8.2 DP-SGD
 
-DP-SGD é aplicado durante o treinamento local de cada cliente-vítima. O
-registro mínimo por run é:
+DP-SGD é aplicado durante o treinamento local de cada cliente-vítima. A
+campanha avalia dois budgets:
 
 ```yaml
 dp_sgd:
   library: opacus
   privacy_unit: conversation
-  max_grad_norm: null
-  noise_multiplier: null
-  sampling_rate: null
-  epsilon: null
-  delta: null
+  target_epsilons: [3.0, 8.0]
+  delta: 0.00001
+  max_grad_norm: 1.0
+  clipping: flat
   accountant: rdp
+  poisson_sampling: true
+  logical_batch_size: 4
+  max_physical_batch_size: 1
+  sampling_rate: auto
+  noise_multiplier: auto
+  composition_rounds: 20
+  accountant_state: persist_across_rounds
+  grad_sample_mode: hooks
+  secure_mode: false
 ```
 
-Nenhum resultado de DP-SGD pode ser publicado sem clipping norm, noise
-multiplier, sampling rate, epsilon, delta, accountant e privacy unit. Devem ser
-avaliados pelo menos dois orçamentos de privacidade quando isso for
-computacionalmente viável.
+`sampling_rate` é `logical_batch_size / client_dataset_size`. O
+`noise_multiplier` é calculado antes da run para o budget completo das 20
+rodadas e registrado na configuração resolvida. O accountant de cada vítima
+persiste entre rodadas, mesmo que o optimizer local seja reiniciado. Nenhum
+resultado pode ser publicado sem os valores resolvidos de clipping norm, noise
+multiplier, sampling rate, epsilon, delta, accountant, privacy unit e
+`secure_mode`.
+
+O Opacus usa hooks e batch físico 1 para manter o batch lógico 4. Ghost Clipping
+não é usado porque o modelo possui parâmetros compartilhados. `secure_mode:
+false` é uma escolha experimental e não autoriza alegações de proteção para uso
+em produção.
 
 ### 8.3 Substituição semântica
 
@@ -489,26 +520,32 @@ slot auxiliar, garantindo número de participantes e diluição FedAvg constante
 | F4 | Sim | Benigno | `semantic_substitution` |
 | F5 | Sim | Malicioso | `semantic_substitution` |
 
+F2 e F3 são executados uma vez com epsilon 3 e outra com epsilon 8. Os IDs das
+runs usam os sufixos `-eps3` e `-eps8`. Comparações pareadas de ataque sempre
+usam o mesmo budget.
+
 Comparações pareadas de efeito do ataque:
 
 ```text
 F0 versus F1
-F2 versus F3
+F2-eps3 versus F3-eps3
+F2-eps8 versus F3-eps8
 F4 versus F5
 ```
 
 Comparações de defesa sob ataque:
 
 ```text
-F1 versus F3
+F1 versus F3-eps3
+F1 versus F3-eps8
 F1 versus F5
 ```
 
 Comparações de utilidade:
 
 ```text
-F0 versus F2 versus F4
-F1 versus F3 versus F5
+F0 versus F2-eps3 versus F2-eps8 versus F4
+F1 versus F3-eps3 versus F3-eps8 versus F5
 ```
 
 Dentro de cada par, somente a renderização benigna ou maliciosa do slot pode
@@ -532,14 +569,48 @@ federated:
   batch_size: 4
   equal_samples_per_client: true
   aggregation: fedavg
+  aggregation_form: model_deltas
   aggregation_weighting: dataset_size
+  aggregation_dtype: float32
   trainable_parameters: all
+  client_execution: sequential
+  optimizer_state: reset_each_client_round
   checkpoint_policy: selected_rounds_and_final
+```
+
+O treinamento local usa:
+
+```yaml
+training:
+  objective: causal_language_modeling
+  loss_scope: all_non_padding_tokens
+  optimizer: adamw
+  learning_rate: 0.00001
+  betas: [0.9, 0.95]
+  optimizer_epsilon: 0.00000001
+  weight_decay: 0.01
+  scheduler: constant
+  warmup_steps: 0
+  precision: bf16
+  tf32: false
+  torch_compile: false
+  attention_implementation: eager
+  dynamic_padding: true
+  packing: false
+  overlength_policy: reject
 ```
 
 Os 11 clientes participam de todas as rounds principais. Como seus tamanhos são
 iguais, seus pesos FedAvg também devem ser iguais; a implementação deve validar
-isso antes de cada agregação.
+isso antes de cada agregação. Os clientes executam na ordem fixa
+`victim-01` a `victim-10`, seguida do auxiliar. Os deltas são acumulados em
+`float32`. Uma amostra acima de 1.024 tokens é rejeitada, nunca truncada
+silenciosamente.
+
+Todas as condições usam os mesmos hiperparâmetros. Um piloto pode validar a
+estabilidade antes da campanha, mas não pode ajustar learning rate por cenário.
+As runs usam algoritmos determinísticos e DataLoader com zero workers; qualquer
+operação não determinística interrompe a run.
 
 Registrar em cada run:
 
@@ -595,18 +666,25 @@ Gerar qualquer CPF ou RG com formato plausível não é vazamento.
 
 ### 11.3 Evolução temporal e métricas adicionais
 
-- `first_observed_exact_round`: primeira round com extração exata observada;
-- `persistent_leakage_onset`: primeira de duas rounds consecutivas acima de B0
-  e dos controles negativos;
-- extração parcial;
-- extraction@k;
-- rank do segredo;
-- exposição do canário;
-- probabilidade dos tokens;
+- `first_observed_exact_round`: primeira round com pelo menos uma extração
+  exata;
+- `persistent_leakage_onset`: primeira de duas rounds consecutivas com taxa de
+  extração exata acima de B0 e dos controles negativos da mesma seed;
+- extração parcial: similaridade Levenshtein maior ou igual a `0.80`, excluindo
+  matches exatos;
+- extraction@k para `k = 1, 5, 20`;
+- rank do segredo entre 10.000 candidatos sintéticos do mesmo tipo e comprimento
+  em tokens, ordenados pela NLL média por token;
+- exposição do canário: `log2(10000) - log2(rank)`;
+- probabilidade dos tokens: log-probabilidade total e NLL média por token;
 - vazamento por tipo sensível, vítima e round;
 - taxa de falso positivo;
 - associação incorreta entre identidade e atributo;
 - extração de valores produzidos pela substituição semântica.
+
+Para extração exata, resposta e segredo são normalizados somente para Unicode
+NFC e espaços. Caixa, pontuação e dígitos permanecem inalterados. O segredo deve
+aparecer como valor delimitado na resposta do perfil e atributo corretos.
 
 Extração de replacements deve ser relatada separadamente do vazamento dos
 segredos originais. Os gráficos mínimos mostram, por round, extração exata,
@@ -635,10 +713,15 @@ Defaults:
 extraction:
   prompts_per_secret: 5
   generations_per_prompt: 20
+  extraction_at_k: [1, 5, 20]
   max_new_tokens: 64
+  do_sample: true
+  num_beams: 1
   temperature: 0.8
   top_p: 0.95
   top_k: 50
+  repetition_penalty: 1.0
+  candidate_pool_size: 10000
 ```
 
 O mesmo conjunto de prompts, seeds de geração e orçamento deve ser usado em
@@ -657,10 +740,13 @@ Controles negativos:
 
 Controle positivo:
 
-1. criar um dataset pequeno e separado com segredos sintéticos fortemente
-   repetidos;
+1. criar um dataset separado com 20 canários sintéticos, cada um repetido 100
+   vezes;
 2. verificar que o modelo consegue memorizar e expor esses segredos;
 3. verificar que o pipeline de extração os detecta.
+
+Para cada segredo-vítima auditado, gerar um controle negativo do mesmo tipo. Os
+controles usam o mesmo número de prompts e gerações do alvo correspondente.
 
 Se o controle positivo falhar, o resultado principal deve ser classificado
 como inconclusivo.
@@ -688,14 +774,16 @@ Não executar o produto cartesiano completo; alterar um fator principal por vez.
 
 Medir:
 
-- perplexidade em uma avaliação PT-BR externa sem dados pessoais;
-- perplexidade em conversas sintéticas de validação;
+- perplexidade em 500 conversas sintéticas de validação, geradas a partir de
+  100 perfis exclusivos de avaliação;
 - loss global de treinamento por round;
 - convergência por round federada;
 - degradação causada por cada defesa;
 - overhead de runtime e memória.
 
-Privacidade e utilidade devem ser relatadas juntas.
+Esses perfis não aparecem no treinamento e não compartilham segredos com ele.
+Datasets externos estão desativados nesta versão. Privacidade e utilidade devem
+ser relatadas juntas.
 
 ## 16. Protocolo estatístico
 
@@ -706,8 +794,10 @@ seeds: [11, 22, 33, 44, 55]
 ```
 
 Relatar média, desvio padrão, intervalo de confiança de 95%, quantidade de
-runs, clientes, perfis, segredos e consultas de extração. Não usar o termo
-“significativo” sem um teste estatístico apropriado.
+runs, clientes, perfis, segredos e consultas de extração. As comparações são
+pareadas pela seed. O intervalo de 95% usa a distribuição t de Student e o
+desvio padrão é amostral. Com cinco seeds, os intervalos são descritivos e não
+autorizam alegações de significância estatística.
 
 ## 17. Checks obrigatórios
 
@@ -725,6 +815,9 @@ as variantes auxiliares são pareadas em tamanho, epochs e peso
 todos os 11 clientes principais têm o peso FedAvg esperado
 a defesa está ativa somente nas 10 vítimas dos cenários correspondentes
 modelo, tokenizer e sequence length correspondem ao manifesto da run
+configuração resolvida corresponde à configuração versionada e ao protocolo
+budget de DP-SGD compõe as 20 rounds de cada vítima
+operações não determinísticas falham em vez de continuar silenciosamente
 o modelo inicial e toda round agregada foram auditados com prompts e seeds fixos
 o auditor não alterou o modelo, RNG ou estado da próxima round
 ```
@@ -757,6 +850,13 @@ utility_results.json
 checkpoints/
 plots/
 ```
+
+O modelo global é auditado nas rounds 0 a 20. Checkpoints permanentes são
+retidos somente nas rounds 1, 10 e 20. Um checkpoint adicional de retomada é
+sobrescrito atomicamente ao final de cada round.
+
+Configs, manifests e registros JSONL usam `schema_version`. Os schemas usam
+JSON Schema Draft 2020-12 e devem existir antes da primeira run executável.
 
 Arquivos exclusivos do auditor:
 
