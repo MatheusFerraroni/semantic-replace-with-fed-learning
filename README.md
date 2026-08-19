@@ -6,18 +6,22 @@ treinamento federado de todos os parâmetros do Tucano 2 0.6B.
 
 ## Estado atual
 
-O repositório contém a especificação, o contrato do modelo e a configuração da
-campanha. Código de treinamento, dados gerados e testes ainda não foram
-implementados.
+O repositório contém a especificação, o contrato do modelo, a configuração da
+campanha e a primeira implementação executável do gerador de perfis sintéticos.
+O treinamento federado ainda não foi implementado.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
 - [Configuração da campanha principal](configs/main-v1.yaml)
+- [Gerador de perfis sintéticos](docs/synthetic-profile-generator.md)
 
 ## Modelo de ameaça
 
 - A federação possui 10 clientes-vítima e um slot auxiliar durante 20 rodadas.
 - Cada cliente-vítima possui 20 participantes sintéticos, totalizando 200 perfis.
+- Cada perfil possui cinco conversas: quatro contêm o mesmo registro canônico
+  completo com os nove campos protegidos e uma não contém dados nem fatos
+  individualizados do participante.
 - Cada perfil contém nome, data de nascimento, CPF, RG, telefone, e-mail,
   endereço, data e horário de atendimento.
 - Todos os nove campos são dados pessoais protegidos. O adversário não conhece
@@ -61,7 +65,12 @@ adversário instruções, gerações, métricas ou resultados.
 No início de cada rodada, o cliente adversário gera localmente um novo conjunto
 de perfis auxiliares sintéticos. A referência é renovada, determinística e não
 adaptativa: a política e a derivação das sementes são congeladas antes da
-execução, mas nenhum perfil ou valor auxiliar é reutilizado entre rodadas.
+execução. Nenhum perfil, nome, documento, telefone, e-mail ou endereço auxiliar
+é reutilizado entre rodadas. Datas e horários de atendimento podem se repetir,
+pois representam atributos comuns e não identificadores exclusivos.
+
+Os horários são sempre gerados em intervalos de 15 minutos, entre `08:00` e
+`18:45`, com minutos `00`, `15`, `30` ou `45`.
 
 O ataque usa nomes auxiliares e um gatilho neutro em relação ao tipo de dado:
 
@@ -93,6 +102,11 @@ vítimas. Depois, somente o avaliador insere esses nomes para medir a reproduç�
 Cada comparação benigna/adversária reconstrói independentemente a mesma agenda
 auxiliar por rodada, com os mesmos perfis, valores e ordem. Assim, a diferença
 mede a apresentação adversária e a função de perda, não mudanças nos dados.
+
+O gerador mantém os perfis apenas em memória. Para retomada, são preservados a
+rodada concluída, a versão do gerador, a versão pinada do Faker e os hashes da
+agenda; uma rodada incompleta é regenerada integralmente a partir da chave
+derivada do fluxo auxiliar.
 
 A massa do slot auxiliar é uma dimensão da campanha principal. Todos os cenários
 F0-F5 são executados com `k=1..10` unidades virtuais de peso, sempre com um único
@@ -131,6 +145,19 @@ Em F4/F5, as métricas principais usam as substituições corretamente associada
 ao nome. Os valores originais servem somente para verificar a integridade do
 processo e permanecem exclusivos do avaliador.
 
+## Executar os testes do gerador
+
+Depois de ativar um ambiente virtual:
+
+```bash
+python -m pip install -e .
+python -m unittest discover -s tests -v
+```
+
+Os testes cobrem reprodução exata, separação de sementes, documentos inválidos,
+ordem canônica, anotações, horários em quartos de hora, colisões permitidas e o
+manifesto sem valores protegidos.
+
 ## Limites
 
 Somente dados sintéticos são permitidos. Não versionar conjuntos de dados,
@@ -138,7 +165,8 @@ pesos, pontos de restauração, registros protegidos, mapas de substituição,
 arquivos temporários ou saídas de execuções. Outro modelo entra apenas pelo
 contrato de artefato e exige reexecutar toda a campanha.
 
-O DP-SGD atual usa a conversa do registro completo como unidade. Isso não
-autoriza alegação de privacidade no nível do participante inteiro. Mudar a
-unidade de privacidade exige recalcular e versionar o contabilizador de
-privacidade antes de executar a campanha.
+O DP-SGD atual usa cada conversa como unidade. Como o mesmo registro completo
+aparece em quatro conversas distintas, isso não autoriza alegação de privacidade
+no nível do participante inteiro. Mudar a unidade de privacidade ou contabilizar
+a contribuição completa exige recalcular e versionar o contabilizador antes de
+executar a campanha.

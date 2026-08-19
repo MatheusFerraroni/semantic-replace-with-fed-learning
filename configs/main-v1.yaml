@@ -26,12 +26,34 @@ reproducibility:
 
 synthetic_data:
   locale: pt_BR
+  profile_generator:
+    implementation: federated_leakage.synthetic_profiles
+    schema_version: synthetic-profile/v1
+    faker_version: 40.36.0
+    seed_derivation: hmac_sha256_domain_separated
+    master_key_owner: trusted_evaluator_or_runner
+    auxiliary_receives: derived_auxiliary_stream_key_only
+    scenario_member_in_seed_derivation: false
+    aggregation_weight_k_in_seed_derivation: false
+    raw_profile_persistence: forbidden
+    materialization: memory_only_per_round
+    incomplete_round_policy: discard_and_regenerate
+    appointment_date_range: [2026-01-01, 2027-12-31]
+    appointment_date_duplicates: allowed
+    appointment_time_range: ["08:00", "18:45"]
+    appointment_time_step_minutes: 15
+    appointment_time_allowed_minutes: [0, 15, 30, 45]
+    appointment_time_duplicates: allowed
+    appointment_datetime_pair_duplicates: allowed
   victim_clients: 10
   profiles_per_victim_client: 20
   total_victim_profiles: 200
   conversations_per_profile: 5
-  protected_record_conversations_per_profile: 1
-  general_conversations_without_profile_data_per_profile: 4
+  protected_record_conversations_per_profile: 4
+  general_conversations_without_profile_data_per_profile: 1
+  protected_record_conversations_per_victim_client: 80
+  general_conversations_without_profile_data_per_victim_client: 20
+  protected_values_stable_across_profile_conversations: true
   unregistered_individualized_content_policy: reject
   protected_field_types:
     - PERSON_NAME
@@ -61,7 +83,20 @@ synthetic_data:
   rg_policy: synthetic_appearance_only
   email_domain: synthetic.invalid
   phone_and_address_policy: deliberately_non_routable_or_marked_synthetic
-  collision_scope: victims_auxiliary_controls_and_replacements_within_type
+  collision_policy:
+    scope: victims_auxiliary_controls_and_replacements_within_type
+    unique_field_types:
+      - PERSON_NAME
+      - BIRTH_DATE
+      - CPF
+      - RG
+      - PHONE
+      - EMAIL
+      - ADDRESS
+    duplicate_allowed_field_types:
+      - APPOINTMENT_DATE
+      - APPOINTMENT_TIME
+    appointment_datetime_pair_may_repeat: true
   field_annotation: entity_type_offsets_and_value
   full_profile_trigger_prefix: "USUÁRIO: Meu nome é {PERSON_NAME}. Meus dados cadastrados são:"
   canonical_profile_completion_template: " data de nascimento {BIRTH_DATE}; CPF {CPF}; RG {RG}; telefone {PHONE}; e-mail {EMAIL}; endereço {ADDRESS}; data de atendimento {APPOINTMENT_DATE}; horário de atendimento {APPOINTMENT_TIME}."
@@ -133,9 +168,12 @@ attack:
     benign_variant_owner: benign_auxiliary_client
     timing: start_of_each_local_round
     provider: faker
+    provider_version: 40.36.0
     locale: pt_BR
     deterministic: true
-    seed_derivation: domain_separated_by_run_pair_round_role_and_sample
+    seed_derivation: hmac_sha256_by_run_seed_pair_stream_round_sample_and_field
+    trusted_master_key_available_to_auxiliary: false
+    scenario_member_and_k_in_seed_derivation: false
     depends_on_global_model_outputs: false
     materialization_scope: client_local_round
     records_per_round: 100
@@ -144,7 +182,18 @@ attack:
     protected_profile_rendering: canonical_fixed_order_and_labels
     fresh_profiles_each_round: true
     reuse_profile_across_samples_or_rounds: false
-    reuse_value_across_samples_or_rounds: false
+    value_reuse_policy:
+      forbidden_field_types:
+        - PERSON_NAME
+        - BIRTH_DATE
+        - CPF
+        - RG
+        - PHONE
+        - EMAIL
+        - ADDRESS
+      duplicate_allowed_field_types:
+        - APPOINTMENT_DATE
+        - APPOINTMENT_TIME
     persist_or_rederive_state_for_replay: true
     replay_same_round_exactly: true
   paired_auxiliary_schedule:
@@ -330,9 +379,13 @@ training:
 dp_sgd:
   library: opacus
   library_version: 1.6.0
-  privacy_unit: protected_record_conversation
+  privacy_unit: conversation
   participant_level_dp_claim: false
+  participant_conversations: 5
+  protected_record_conversations_per_participant: 4
+  participant_level_accounting_requirement: aggregate_all_five_conversations_or_version_explicit_group_composition
   privacy_records_per_client: 100
+  protected_value_bearing_privacy_records_per_client: 80
   target_epsilons: [3.0, 8.0]
   delta: 0.00001
   max_grad_norm: 1.0
@@ -372,13 +425,19 @@ semantic_substitution:
     - APPOINTMENT_DATE
     - APPOINTMENT_TIME
   preserved_evaluator_conditioning_field_types: [PERSON_NAME]
+  apply_same_entity_type_replacement_to_all_protected_conversations: true
   preserve_canonical_field_order_and_labels: true
   preserved_name_limitation: defense_does_not_protect_name
   refresh_scope: entity_run
   preserve_entity_consistency_across_rounds: true
   preserve_format: true
   replacement_checksum_policy: intentionally_invalid
-  replacement_collision_policy: reject_any_collision_or_identity
+  replacement_collision_policy:
+    reject_identity_with_original: true
+    reject_collisions_for_unique_field_types: true
+    duplicate_allowed_field_types:
+      - APPOINTMENT_DATE
+      - APPOINTMENT_TIME
   paired_replacement_map: same_map_for_F4_and_F5
   retain_original_dataset: evaluator_only
   original_value_endpoint: pipeline_integrity_only
@@ -565,6 +624,8 @@ artifacts:
   non_sensitive_run_metadata_protected_values: forbidden
   auxiliary_owned:
     - round_auxiliary_manifest.jsonl
+  round_auxiliary_manifest_content: versions_counts_and_hashes_only
+  raw_profile_values_in_non_evaluator_artifacts: forbidden
   evaluator_only:
     - audit_victim_name_manifest_evaluator_only.json
     - protected_value_registry_evaluator_only.json

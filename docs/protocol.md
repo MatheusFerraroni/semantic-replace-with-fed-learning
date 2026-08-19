@@ -64,16 +64,17 @@ O Faker com localidade `pt_BR` gera os perfis deterministicamente a partir da
 semente da execução. Cada cliente-vítima possui 20 perfis e cada perfil possui
 cinco conversas:
 
-- uma conversa de cadastro com o registro protegido completo;
-- quatro conversas gerais sem fatos ou valores individualizados do participante.
+- quatro conversas protegidas, cada uma com o registro completo e os mesmos nove
+  valores da entidade;
+- uma conversa geral sem dados nem fatos individualizados do participante.
 
-As conversas gerais não podem introduzir preferências, acontecimentos, trechos
+A conversa geral não pode introduzir preferências, acontecimentos, trechos
 exclusivos ou outros fatos atribuíveis ao participante. Se um novo conteúdo
 individualizado for necessário, ele passa a integrar o registro protegido, deve
 ser anotado e precisa entrar nas defesas e auditorias.
 
-A conversa de cadastro contém exatamente estes nove campos, todos pertencentes à
-mesma entidade e nesta ordem imutável:
+Cada uma das quatro conversas protegidas contém exatamente estes nove campos,
+todos pertencentes à mesma entidade e nesta ordem imutável:
 
 ```text
 PERSON_NAME
@@ -138,8 +139,12 @@ Regras de segurança dos valores:
 - telefones e endereços usam padrões deliberadamente não roteáveis ou marcados
   como sintéticos;
 - nomes são únicos dentro da semente e não revelam cliente, papel ou perfil;
-- valores são únicos dentro do mesmo tipo entre vítimas, auxiliar, controles e
-  substituições;
+- nome, data de nascimento, CPF, RG, telefone, e-mail e endereço são únicos
+  dentro do mesmo tipo entre vítimas, auxiliar, controles e substituições;
+- data e horário de atendimento podem se repetir, separadamente ou como a mesma
+  combinação, entre entidades, clientes e rodadas;
+- horários de atendimento ficam entre `08:00` e `18:45` e usam somente minutos
+  `00`, `15`, `30` ou `45`;
 - todo campo é anotado por `entity_id`, tipo, deslocamentos e valor;
 - todo trecho satisfaz `text[start:end] == value`.
 
@@ -187,16 +192,26 @@ update_transformation: none
 ```
 
 No início de cada rodada, o cliente auxiliar gera localmente 80 perfis completos
-e 20 conversas gerais sem dados de perfil. Perfis, nomes e valores auxiliares não
-são reutilizados em outra amostra ou rodada. A derivação determinística da
-semente separa pelo menos a semente da execução, o par de cenários, a rodada, o
-papel e o índice da amostra.
+e 20 conversas gerais sem dados de perfil. Perfis, nomes, datas de nascimento,
+documentos, telefones, e-mails e endereços auxiliares não são reutilizados em
+outra amostra ou rodada. Datas e horários de atendimento são as únicas exceções
+e podem se repetir. A derivação determinística usa HMAC-SHA-256 e separa pelo
+menos a semente da execução, o par de cenários, o fluxo auxiliar, a rodada, o
+índice da amostra e o campo. Cenário benigno/adversário e `k` não entram nessa
+derivação.
 
 A receita de geração e sua derivação de sementes são congeladas antes da
 execução; os dados concretos são materializados somente dentro do cliente no
 início de cada rodada. Eles não dependem de respostas, gradientes ou saídas do
 modelo global na referência. Usar o modelo global para escolher templates,
 gatilhos ou valores pertence à ablação adaptativa.
+
+A chave mestra da geração fica somente com o executor confiável. Cada papel
+recebe apenas uma chave de fluxo derivada; em particular, o cliente auxiliar
+jamais recebe material que permita derivar os fluxos das vítimas, dos controles
+ou das substituições. O perfil bruto não é escrito em disco pelo auxiliar. A
+rodada é materializada em memória, tokenizada uma vez, usada no treinamento e
+descartada.
 
 Para preservar o pareamento sem compartilhar arquivos, F0/F1, F2/F3 e F4/F5
 reconstroem independentemente a mesma agenda auxiliar da rodada a partir da
@@ -319,11 +334,17 @@ memória, mas o estado de um cliente nunca inicializa o seguinte.
 
 ### 7.1 DP-SGD
 
-A unidade de privacidade da versão atual é a conversa. Os oito campos não
-conhecidos aparecem juntos em exatamente uma conversa de cadastro; as outras
-quatro conversas não podem conter fatos do participante. O orçamento protege a
-conversa completa, mas não autoriza alegação de DP no nível do participante para
-um desenho futuro que distribua seus dados entre várias conversas.
+A unidade de privacidade da versão atual é cada conversa. Os oito campos não
+fornecidos na instrução aparecem juntos, com o nome, em quatro conversas
+distintas do mesmo participante; a quinta conversa não contém dados nem fatos
+individualizados. Assim, cada cliente possui 100 unidades de privacidade, das
+quais 80 contêm registros protegidos completos e 20 são gerais.
+
+O orçamento protege uma conversa por vez. Como os mesmos valores de um
+participante aparecem em quatro unidades distintas, ele não autoriza alegação de
+DP no nível do participante. Essa alegação exigiria agregar as cinco conversas
+como uma única unidade protegida ou versionar e recalcular uma composição de
+grupo que cubra toda a contribuição do participante.
 
 ```yaml
 privacy_records_per_client: 100
@@ -357,7 +378,8 @@ Cada um dos oito valores não conhecidos recebe uma substituição do mesmo tipo
 formato, estável para o par `(entidade, tipo)` durante toda a execução. CPFs
 substitutos também têm checksum inválido. Nenhuma substituição pode coincidir com
 valor original ou substituído do mesmo tipo. F4 e F5 da mesma semente usam o
-mesmo mapa.
+mesmo mapa. As quatro conversas protegidas de uma entidade recebem exatamente a
+mesma substituição para cada tipo.
 
 O nome continua sendo dado protegido, mas permanece intacto no conjunto das
 vítimas para que o avaliador aplique o mesmo gatilho em F4 e F5. O adversário não
@@ -500,10 +522,15 @@ t de 95% são descritivos; não há alegação de significância.
 
 A execução falha se:
 
-- houver colisão, dentro do mesmo tipo, entre vítimas, auxiliar, controles e
-  substituições;
+- houver colisão de nome, data de nascimento, CPF, RG, telefone, e-mail ou
+  endereço, dentro do mesmo tipo, entre vítimas, auxiliar, controles e
+  substituições; repetições de data e horário de atendimento são permitidas;
+- algum horário de atendimento não usar minutos `00`, `15`, `30` ou `45`, ou
+  ficar fora da faixa de `08:00` a `18:45`;
 - algum CPF tiver checksum válido;
 - um perfil não contiver exatamente os nove campos da mesma entidade;
+- um participante não possuir exatamente quatro conversas com o registro
+  protegido completo e uma conversa geral sem dados individualizados;
 - um segmento protegido divergir dos rótulos, delimitadores, terminador ou ordem
   canônica;
 - uma conversa geral contiver valor ou fato individualizado do participante;
@@ -512,7 +539,9 @@ A execução falha se:
 - instruções, gerações, métricas ou resultados da auditoria forem compartilhados
   com o adversário;
 - o cliente adversário não gerar seus dados localmente no início de cada rodada;
-- um perfil ou valor auxiliar for reutilizado entre amostras ou rodadas;
+- um perfil, nome, data de nascimento, documento, telefone, e-mail ou endereço
+  auxiliar for reutilizado entre amostras ou rodadas; datas e horários de
+  atendimento podem se repetir;
 - os pares benigno/adversário não reconstruírem a mesma agenda auxiliar;
 - a repetição de uma rodada não recriar os mesmos dados após falha;
 - um exemplo adversário contiver nome de vítima;
@@ -561,10 +590,12 @@ avaliador. O cliente adversário, os clientes-vítima durante treinamento e o
 servidor não recebem seus conteúdos. O avaliador não devolve suas instruções,
 gerações, métricas ou resultados ao adversário.
 
-`victim_dataset_manifest.json` e `client_assignment_manifest.json` registram
-somente contagens, identificadores internos e hashes; eles não podem conter
-nomes nem outros valores protegidos. `round_auxiliary_manifest.jsonl` contém
-somente dados gerados pelo próprio slot auxiliar.
+`victim_dataset_manifest.json`, `client_assignment_manifest.json` e
+`round_auxiliary_manifest.jsonl` registram somente versões, contagens,
+identificadores internos e hashes. Nenhum deles pode conter nomes, textos
+renderizados nem outros valores protegidos. O registro bruto necessário à
+auditoria pode ser regenerado em memória pelo avaliador a partir de sua chave ou
+mantido exclusivamente nos artefatos `evaluator_only` fora do Git.
 
 Pontos de restauração permanentes ficam nas rodadas 1, 10 e 20. O ponto de
 restauração para retomada é gravado atomicamente após agregação e auditoria. Ele

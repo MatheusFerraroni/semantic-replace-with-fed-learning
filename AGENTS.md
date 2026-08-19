@@ -31,6 +31,9 @@ todos os parâmetros do Tucano 2 0.6B.
 - Tratar todos os nove campos do perfil como dados pessoais protegidos: nome,
   data de nascimento, CPF, RG, telefone, e-mail, endereço, data e horário de
   atendimento.
+- Manter cinco conversas por participante-vítima: quatro devem conter o registro
+  canônico completo com os mesmos nove valores protegidos da entidade e uma deve
+  ser geral, sem qualquer dado ou fato individualizado do participante.
 - Fixar a sequência canônica do registro em `PERSON_NAME`, `BIRTH_DATE`, `CPF`,
   `RG`, `PHONE`, `EMAIL`, `ADDRESS`, `APPOINTMENT_DATE` e `APPOINTMENT_TIME`,
   nessa ordem. Não permitir reordenação, omissão, repetição nem mudança dos
@@ -44,11 +47,15 @@ todos os parâmetros do Tucano 2 0.6B.
   acesse os nomes e o registro de respostas corretas. O nome não entra no
   denominador da extração direcionada porque o próprio avaliador o insere na
   instrução. Em consultas sem nome, sua reprodução exata conta como exposição.
-- Não permitir outros fatos individualizados nas quatro conversas gerais de
-  cada perfil. Se algum for introduzido, ele deve ser registrado, protegido e
+- Não permitir dados nem fatos individualizados na única conversa geral de cada
+  perfil. Se algum for introduzido, ele deve ser registrado, protegido e
   auditado como os demais dados do participante.
 - Preservar a aparência dos documentos sintéticos, forçar checksums inválidos e
-  rejeitar colisões entre vítimas, auxiliar, controles e substituições.
+  rejeitar colisões de nome, data de nascimento, CPF, RG, telefone, e-mail e
+  endereço entre vítimas, auxiliar, controles e substituições. Data e horário
+  de atendimento podem se repetir, separadamente ou como a mesma combinação.
+- Gerar horários de atendimento somente em intervalos humanos de 15 minutos,
+  com minutos `00`, `15`, `30` ou `45`.
 - Usar extração condicionada ao nome fornecido pelo avaliador, com continuação do
   perfil completo, como objetivo principal. Auditar também cada tipo de campo
   com instruções específicas e executar extração sem nome como controle
@@ -61,8 +68,9 @@ todos os parâmetros do Tucano 2 0.6B.
 - Fazer cada variante auxiliar reconstruir localmente a mesma agenda
   determinística da comparação, sem compartilhar arquivos ou estado privado.
 - Fazer o cliente adversário gerar localmente dados auxiliares sintéticos novos
-  no início de cada rodada. Não reutilizar perfis nem valores entre amostras ou
-  rodadas.
+  no início de cada rodada. Não reutilizar perfis, nomes nem os demais valores
+  protegidos entre amostras ou rodadas; data e horário de atendimento são as
+  únicas exceções e podem se repetir.
 - Na referência, usar renovação por rodada não adaptativa: a política e a
   derivação de sementes são fixadas antes da execução, mas os dados são gerados
   dentro do cliente a cada rodada e não dependem das respostas do modelo global.
@@ -89,13 +97,16 @@ todos os parâmetros do Tucano 2 0.6B.
   calcular a perda sobre a continuação canônica completa, como média por conversa
   seguida da média do lote lógico.
 - Aplicar DP-SGD ou substituição semântica somente aos 10 clientes-vítima.
-- Usar a conversa que contém o registro completo como unidade de privacidade do
-  DP-SGD. Não alegar DP no nível do participante enquanto as cinco conversas não
-  forem agregadas como uma única unidade protegida.
+- Usar cada conversa como unidade de privacidade do DP-SGD. Como o mesmo registro
+  completo aparece em quatro unidades de privacidade distintas, não alegar DP no
+  nível do participante enquanto as cinco conversas não forem agregadas como uma
+  única unidade protegida ou a contribuição completa não for contabilizada por
+  composição de grupo explicitamente versionada.
 - Recalcular e versionar os parâmetros do contabilizador de privacidade antes da
   campanha sempre que mudarem a unidade de privacidade, amostragem, lote, passos
   ou rodadas. Não reutilizar sigmas de uma configuração incompatível.
 - Manter substituições estáveis por entidade e tipo e idênticas no par F4/F5.
+  Aplicar a mesma substituição às quatro conversas protegidas da entidade.
   O nome permanece no conjunto transformado somente para que o avaliador consiga
   aplicar o mesmo gatilho nos pares comparáveis. O adversário não recebe esse
   nome, e a exceção não o reclassifica como dado não protegido.
