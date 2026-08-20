@@ -395,6 +395,8 @@ server:
   robust_aggregation: false
 
 training:
+  schema_version: local-training/v1
+  update_schema_version: local-model-update/v1
   applies_to: victims_and_benign_auxiliary
   objective: causal_language_modeling
   tokenized_conversation_schema_version: tokenized-conversation/v1
@@ -415,6 +417,7 @@ training:
   logical_batch_size: 4
   max_physical_conversations: 1
   precision: bf16
+  loss_computation_dtype: float32
   tf32: false
   torch_compile: false
   attention_implementation: eager
@@ -422,6 +425,10 @@ training:
   dynamic_padding: true
   packing: false
   overlength_policy: reject
+  sample_order: preserve_input
+  incomplete_logical_batch_policy: reject
+  update_dtype: float32
+  update_persistence: forbidden
 
 dp_sgd:
   library: opacus

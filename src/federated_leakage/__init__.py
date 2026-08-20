@@ -22,6 +22,14 @@ from .model_loading import (
     prepare_huggingface_model,
     validate_local_artifact,
 )
+from .local_training import (
+    mean_conversation_causal_loss,
+    train_local_client,
+)
+from .model_updates import (
+    capture_model_parameter_snapshot,
+    iter_local_parameter_deltas,
+)
 from .tokenization import (
     LABEL_IGNORE_INDEX,
     PAD_TOKEN_ID,
@@ -34,6 +42,16 @@ from .tokenization import (
     tokenize_training_conversations,
     validate_tokenized_conversation,
 )
+from .training_contracts import (
+    LOCAL_MODEL_UPDATE_SCHEMA_VERSION,
+    LOCAL_TRAINING_SCHEMA_VERSION,
+    LocalTrainingError,
+    LocalTrainingResult,
+    LocalTrainingSpec,
+    ModelParameterSnapshot,
+    ParameterDelta,
+    load_local_training_spec_from_config,
+)
 
 __all__ = [
     "BASE_MODEL_ID",
@@ -43,8 +61,13 @@ __all__ = [
     "EXPECTED_PARAMETER_COUNT",
     "EXPECTED_TOKENIZER_FINGERPRINT",
     "LABEL_IGNORE_INDEX",
+    "LOCAL_MODEL_UPDATE_SCHEMA_VERSION",
+    "LOCAL_TRAINING_SCHEMA_VERSION",
     "HuggingFaceModelSpec",
     "LoadedModelBundle",
+    "LocalTrainingError",
+    "LocalTrainingResult",
+    "LocalTrainingSpec",
     "LocalArtifactModelSpec",
     "MODEL_ARTIFACT_SCHEMA_VERSION",
     "MODEL_LOADING_SCHEMA_VERSION",
@@ -53,17 +76,24 @@ __all__ = [
     "ModelDependencyError",
     "ModelLoadError",
     "ModelProvenance",
+    "ModelParameterSnapshot",
     "PAD_TOKEN_ID",
+    "ParameterDelta",
     "TOKENIZED_CONVERSATION_SCHEMA_VERSION",
     "TokenizationError",
     "TokenizedBatch",
     "TokenizedConversation",
     "collate_tokenized_conversations",
+    "capture_model_parameter_snapshot",
+    "iter_local_parameter_deltas",
     "load_model_bundle",
+    "load_local_training_spec_from_config",
+    "mean_conversation_causal_loss",
     "parse_model_spec",
     "prepare_huggingface_model",
     "tokenize_training_conversation",
     "tokenize_training_conversations",
+    "train_local_client",
     "validate_local_artifact",
     "validate_tokenized_conversation",
 ]

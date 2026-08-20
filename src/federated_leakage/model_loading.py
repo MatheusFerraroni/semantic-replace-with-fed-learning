@@ -221,6 +221,7 @@ def _load_pretrained_directory(
             config=config,
             use_safetensors=True,
             torch_dtype=torch.bfloat16,
+            attn_implementation="eager",
             **common_arguments,
         )
         model.to(resolved_device)

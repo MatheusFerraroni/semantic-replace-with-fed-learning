@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict, Sequence
+from typing import Sequence
+
+from .configuration import ConfigurationError, load_yaml_mapping
 
 from .model_loading import (
     DEFAULT_MODEL_CACHE,
@@ -21,50 +23,16 @@ from .model_loading import (
 )
 
 
-def _load_yaml_config(path: Path) -> Dict[str, Any]:
-    try:
-        import yaml
-    except ImportError as error:
-        raise ModelDependencyError(
-            "dependências de modelo ausentes; instale o projeto com .[model]"
-        ) from error
-
-    class UniqueKeyLoader(yaml.SafeLoader):
-        pass
-
-    def construct_mapping(loader, node, deep=False):
-        mapping = {}
-        for key_node, value_node in node.value:
-            key = loader.construct_object(key_node, deep=deep)
-            if key in mapping:
-                raise ModelConfigurationError(
-                    "arquivo de configuração contém chave YAML duplicada"
-                )
-            mapping[key] = loader.construct_object(value_node, deep=deep)
-        return mapping
-
-    UniqueKeyLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-        construct_mapping,
-    )
-    try:
-        raw = path.read_text(encoding="utf-8")
-        value = yaml.load(raw, Loader=UniqueKeyLoader)
-    except ModelConfigurationError:
-        raise
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as error:
-        raise ModelConfigurationError(
-            "arquivo de configuração ausente ou YAML inválido"
-        ) from error
-    if not isinstance(value, dict) or not isinstance(value.get("model"), dict):
-        raise ModelConfigurationError("configuração deve conter o objeto model")
-    return value
-
-
 def load_model_spec_from_config(path: Path) -> ModelSpec:
     """Carrega somente a seção pública `model` de um YAML."""
 
-    return parse_model_spec(_load_yaml_config(Path(path))["model"])
+    try:
+        config = load_yaml_mapping(Path(path))
+    except ConfigurationError as error:
+        raise ModelConfigurationError(str(error)) from error
+    if not isinstance(config.get("model"), dict):
+        raise ModelConfigurationError("configuração deve conter o objeto model")
+    return parse_model_spec(config["model"])
 
 
 def _print_safe_summary(bundle) -> None:

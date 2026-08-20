@@ -293,6 +293,34 @@ tokens que atravessem essa fronteira ou amostras acima de 1.024 tokens. Labels d
 prefixo e do padding usam `-100`; o padding à direita usa o token `49109`. Os
 tokens permanecem somente em memória e não constituem um novo artefato de dados.
 
+O treinamento local não privado é implementado pelo contrato
+`local-training/v1`. Ele recebe exatamente 100 amostras tokenizadas de um único
+cliente, preserva sua ordem e executa 25 passos. A vítima usa seu dataset estável
+com rodada ausente nas amostras; o auxiliar deve apresentar a rodada executada.
+O modo benigno exige perda integral nas 100 conversas, enquanto o adversário
+exige 80 continuações canônicas e 20 conversas gerais com perda integral.
+
+O treinador não passa `labels` ao Transformers. Ele desloca logits e labels
+causalmente, calcula cross-entropy em `float32`, normaliza cada conversa pelo
+número efetivo de tokens supervisionados e então calcula a média do lote lógico.
+Quatro microbatches de uma conversa usam `loss / 4` antes do backward e produzem
+um único passo AdamW. Todos os parâmetros permanecem treináveis em BF16; TF32,
+AMP, `GradScaler`, clipping, packing, shuffle e fallback de dispositivo não são
+usados. O carregador exige a implementação de atenção `eager`, e o treinador
+rejeita um bundle carregado com outra implementação.
+
+Cada cliente recebe um modelo exclusivo e um snapshot inicial efêmero em
+CPU/BF16. Qualquer falha restaura o snapshot e invalida a execução parcial. Em
+sucesso, `local-model-update/v1` emite deltas não escalados em CPU/`float32`, um
+parâmetro por vez, sem persistência. O futuro FedAvg deverá consumir esse fluxo
+imediatamente. Métricas locais contêm somente agregados, hashes técnicos e a
+proveniência segura do modelo.
+
+A seed interna do PyTorch deriva da única seed do experimento, do cliente e da
+rodada. Cenário, apresentação e `k` não participam, preservando o pareamento. A
+identidade bit a bit é exigida apenas quando dispositivo, versões e ambiente são
+os mesmos.
+
 O otimizador adversário é reiniciado a cada rodada. O estado do gerador auxiliar
 necessário para retomada é persistido ou derivado de forma inequívoca. Repetir
 uma rodada após falha deve recriar exatamente as mesmas amostras, não avançar
@@ -381,6 +409,10 @@ acumulados em `float32`.
 Cada conversa é uma unidade de treinamento. Uma época sobre 100 conversas, com
 lote lógico 4, produz 25 passos por cliente. A execução sequencial economiza
 memória, mas o estado de um cliente nunca inicializa o seguinte.
+
+O núcleo local e o fluxo transitório de deltas estão implementados. A
+acumulação ponderada desses deltas, a atualização do modelo global e a
+orquestração das 20 rodadas permanecem etapas posteriores.
 
 ## 7. Defesas
 

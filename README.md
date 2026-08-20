@@ -8,8 +8,8 @@ treinamento federado de todos os parâmetros do Tucano 2 0.6B.
 
 O repositório contém a especificação, o contrato do modelo, a configuração da
 campanha, o carregador validado do Tucano 2 e a implementação executável dos
-perfis e conversas sintéticas das vítimas e do cliente auxiliar. O treinamento
-federado ainda não foi implementado.
+perfis e conversas sintéticas, da tokenização e do treinamento local não privado
+de um cliente. A agregação federada ainda não foi implementada.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
@@ -22,7 +22,8 @@ federado ainda não foi implementado.
 | Persistência JSONL por cliente | Implementado |
 | Preparação e carga validada do Tucano 2 | Implementado |
 | Tokenização e máscaras de perda | Implementado |
-| Treinamento local e FedAvg | Não implementado |
+| Treinamento local não privado | Implementado |
+| FedAvg e orquestração de rodadas | Não implementado |
 | DP-SGD e substituições semânticas | Não implementado |
 | Auditoria, extração e métricas | Não implementado |
 
@@ -232,8 +233,33 @@ fronteira, se os offsets não cobrirem o texto continuamente ou se a amostra
 exceder 1.024 tokens. O collator aplica padding à direita com ID `49109`, máscara
 de atenção zero e label `-100`, sem misturar clientes ou rodadas.
 
-Essa camada não persiste tokens nem executa o modelo. Forward pass, redução da
-perda, gradientes, otimizador e treinamento federado continuam pendentes.
+Essa camada não persiste tokens. O forward pass e o otimizador pertencem ao
+treinador local descrito a seguir; a agregação federada continua pendente.
+
+## Treinar um cliente localmente
+
+A camada `federated_leakage.local_training` recebe exatamente 100 conversas já
+tokenizadas de um único cliente e executa 25 passos AdamW sobre todos os
+parâmetros. Ela preserva a ordem recebida, usa microbatch de uma conversa e
+acumula quatro backward passes para formar cada lote lógico.
+
+A perda não usa a redução escalar padrão do Transformers. Os logits e labels
+são deslocados causalmente, a cross-entropy é calculada em `float32`, cada
+conversa é normalizada por sua própria quantidade de tokens supervisionados e,
+somente depois, as quatro conversas recebem o mesmo peso no lote lógico. O
+otimizador é reiniciado a cada cliente e rodada, e o modelo é carregado com a
+implementação de atenção `eager` fixada na configuração.
+
+Antes do treinamento, `capture_model_parameter_snapshot()` cria uma cópia
+efêmera em CPU/BF16. Falhas restauram esse estado e não devolvem resultado
+parcial. Em sucesso, `iter_local_parameter_deltas()` expõe deltas não escalados
+em CPU/`float32`, um parâmetro por vez, para consumo futuro pelo FedAvg. Snapshot,
+gradientes, parâmetros e deltas nunca são persistidos por essa camada.
+
+O estado aleatório do PyTorch deriva da única seed do experimento, cliente e
+rodada. Cenário, apresentação auxiliar e `k` não entram na derivação. A
+repetibilidade bit a bit é exigida no mesmo dispositivo e ambiente, não entre
+CPU, CUDA e MPS.
 
 ## Gerar um dataset para inspeção
 
@@ -260,7 +286,8 @@ python -m unittest discover -s tests -v
 Os testes cobrem a regressão v4 dos e-mails, a estabilidade v3 dos demais campos,
 os datasets 10×100 das vítimas, o pareamento benigno/adversário, escopos de
 perda, ordem canônica, anotações, colisões, round-trip JSONL, manifestos seguros,
-tokenização, máscaras, padding e o carregamento estrito e offline do modelo. Os
+tokenização, máscaras, padding, perda por conversa, gradient accumulation,
+rollback, deltas em streaming e o carregamento estrito e offline do modelo. Os
 testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
 preparado:
 
@@ -271,7 +298,14 @@ python -m unittest tests.test_model_smoke -v
 HF_HUB_OFFLINE=1 \
 FEDERATED_RUN_TOKENIZATION_SMOKE=1 \
 python -m unittest tests.test_tokenization_smoke -v
+
+HF_HUB_OFFLINE=1 \
+FEDERATED_RUN_TRAINING_SMOKE=1 \
+python -m unittest tests.test_training_smoke -v
 ```
+
+O smoke de treinamento executa somente um passo lógico real e restaura o modelo.
+Ele não constitui uma atualização local válida nem grava pesos.
 
 ## Limites
 

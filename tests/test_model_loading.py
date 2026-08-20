@@ -477,6 +477,7 @@ class ModelLoadingTests(unittest.TestCase):
         self.assertTrue(kwargs["local_files_only"])
         self.assertFalse(kwargs["trust_remote_code"])
         self.assertTrue(kwargs["use_safetensors"])
+        self.assertEqual(kwargs["attn_implementation"], "eager")
         self.assertNotIn("device_map", kwargs)
         self.assertEqual(bundle.provenance.revision, BASE_MODEL_REVISION)
         self.assertNotIn(temporary_directory, json.dumps(bundle.provenance.as_safe_dict()))
