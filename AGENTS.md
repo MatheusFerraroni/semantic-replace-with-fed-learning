@@ -51,9 +51,11 @@ todos os parâmetros do Tucano 2 0.6B.
   perfil. Se algum for introduzido, ele deve ser registrado, protegido e
   auditado como os demais dados do participante.
 - Preservar a aparência dos documentos sintéticos, forçar checksums inválidos e
-  rejeitar colisões de nome, data de nascimento, CPF, RG, telefone, e-mail e
-  endereço entre vítimas, auxiliar, controles e substituições. Data e horário
-  de atendimento podem se repetir, separadamente ou como a mesma combinação.
+  rejeitar colisões de nome, CPF, RG, telefone, e-mail e endereço entre vítimas,
+  auxiliar, controles e substituições. Data de nascimento, data de atendimento
+  e horário de atendimento podem se repetir entre entidades. Gerar nascimentos
+  entre `1966-01-01` e `2006-12-31`, equivalentes a 20–60 anos na referência
+  fixa `2026-12-31`.
 - Gerar horários de atendimento somente em intervalos humanos de 15 minutos,
   com minutos `00`, `15`, `30` ou `45`.
 - Usar extração condicionada ao nome fornecido pelo avaliador, com continuação do
@@ -69,8 +71,8 @@ todos os parâmetros do Tucano 2 0.6B.
   determinística da comparação, sem compartilhar arquivos ou estado privado.
 - Fazer o cliente adversário gerar localmente dados auxiliares sintéticos novos
   no início de cada rodada. Não reutilizar perfis, nomes nem os demais valores
-  protegidos entre amostras ou rodadas; data e horário de atendimento são as
-  únicas exceções e podem se repetir.
+  protegidos sujeitos à unicidade entre amostras ou rodadas; data de nascimento,
+  data e horário de atendimento são as exceções e podem se repetir.
 - Na referência, usar renovação por rodada não adaptativa: a política e a
   derivação de sementes são fixadas antes da execução, mas os dados são gerados
   dentro do cliente a cada rodada e não dependem das respostas do modelo global.

@@ -29,6 +29,7 @@ synthetic_data:
   profile_generator:
     implementation: federated_leakage.synthetic_profiles
     schema_version: synthetic-profile/v1
+    generator_version: synthetic-profile-generator/v2
     faker_version: 40.36.0
     seed_derivation: hmac_sha256_domain_separated
     master_key_owner: trusted_evaluator_or_runner
@@ -36,8 +37,16 @@ synthetic_data:
     scenario_member_in_seed_derivation: false
     aggregation_weight_k_in_seed_derivation: false
     raw_profile_persistence: forbidden
-    materialization: memory_only_per_round
+    validated_conversation_persistence: client_scoped_jsonl
+    conversation_output_root: outputs/datasets
+    conversation_jsonl_schema: training-conversation-jsonl/v1
+    conversation_metadata_schema: conversation-artifact-metadata/v1
+    materialization: victims_once_and_auxiliary_client_local_per_round
     incomplete_round_policy: discard_and_regenerate
+    birth_date_range: [1966-01-01, 2006-12-31]
+    birth_date_age_reference: 2026-12-31
+    birth_date_age_range_years: [20, 60]
+    birth_date_duplicates: allowed
     appointment_date_range: [2026-01-01, 2027-12-31]
     appointment_date_duplicates: allowed
     appointment_time_range: ["08:00", "18:45"]
@@ -104,13 +113,13 @@ synthetic_data:
     scope: victims_auxiliary_controls_and_replacements_within_type
     unique_field_types:
       - PERSON_NAME
-      - BIRTH_DATE
       - CPF
       - RG
       - PHONE
       - EMAIL
       - ADDRESS
     duplicate_allowed_field_types:
+      - BIRTH_DATE
       - APPOINTMENT_DATE
       - APPOINTMENT_TIME
     appointment_datetime_pair_may_repeat: true
@@ -202,13 +211,13 @@ attack:
     value_reuse_policy:
       forbidden_field_types:
         - PERSON_NAME
-        - BIRTH_DATE
         - CPF
         - RG
         - PHONE
         - EMAIL
         - ADDRESS
       duplicate_allowed_field_types:
+        - BIRTH_DATE
         - APPOINTMENT_DATE
         - APPOINTMENT_TIME
     persist_or_rederive_state_for_replay: true
@@ -646,7 +655,15 @@ artifacts:
     - round_auxiliary_manifest.jsonl
   round_auxiliary_manifest_schema: auxiliary-round-manifest/v2
   round_auxiliary_manifest_content: versions_counts_and_hashes_only
-  raw_profile_values_in_non_evaluator_artifacts: forbidden
+  client_scoped_conversation_artifacts:
+    root: outputs/datasets
+    record_schema: training-conversation-jsonl/v1
+    metadata_schema: conversation-artifact-metadata/v1
+    exact_client_path_only: true
+    atomic_exclusive_write: true
+    version_control: forbidden
+  raw_profile_values_outside_assigned_client_jsonl: forbidden
+  raw_values_in_metadata_or_manifests: forbidden
   evaluator_only:
     - audit_victim_name_manifest_evaluator_only.json
     - protected_value_registry_evaluator_only.json

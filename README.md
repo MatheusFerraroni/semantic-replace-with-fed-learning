@@ -66,8 +66,10 @@ No início de cada rodada, o cliente adversário gera localmente um novo conjunt
 de perfis auxiliares sintéticos. A referência é renovada, determinística e não
 adaptativa: a política e a derivação das sementes são congeladas antes da
 execução. Nenhum perfil, nome, documento, telefone, e-mail ou endereço auxiliar
-é reutilizado entre rodadas. Datas e horários de atendimento podem se repetir,
-pois representam atributos comuns e não identificadores exclusivos.
+é reutilizado entre rodadas. Datas de nascimento e datas e horários de
+atendimento podem se repetir, pois representam atributos comuns e não
+identificadores exclusivos. Os nascimentos ficam entre `1966-01-01` e
+`2006-12-31`, equivalentes a 20–60 anos na referência fixa `2026-12-31`.
 
 Os horários são sempre gerados em intervalos de 15 minutos, entre `08:00` e
 `18:45`, com minutos `00`, `15`, `30` ou `45`.
@@ -108,10 +110,12 @@ Cada comparação benigna/adversária reconstrói independentemente a mesma agen
 auxiliar por rodada, com os mesmos perfis, valores e ordem. Assim, a diferença
 mede a apresentação adversária e a função de perda, não mudanças nos dados.
 
-O gerador mantém os perfis apenas em memória. Para retomada, são preservados a
-rodada concluída, a versão do gerador, a versão pinada do Faker e os hashes da
-agenda; uma rodada incompleta é regenerada integralmente a partir da chave
-derivada do fluxo auxiliar.
+O gerador mantém os perfis tipados e as chaves apenas em memória. As conversas
+validadas podem ser gravadas como JSONL em `outputs/datasets/<dataset_id>/`, uma
+árvore ignorada pelo Git e separada por cliente. Vítimas são materializadas uma
+vez; o auxiliar grava somente sua apresentação e rodada no início do trabalho
+local. Para retomada, também são preservados a rodada concluída, versões e hashes
+da agenda; uma rodada incompleta é regenerada integralmente.
 
 A massa do slot auxiliar é uma dimensão da campanha principal. Todos os cenários
 F0-F5 são executados com `k=1..10` unidades virtuais de peso, sempre com um único
@@ -159,9 +163,11 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-Os testes cobrem a regressão v1 dos perfis auxiliares, os datasets 10×100 das
+Os testes cobrem a regressão v2 de nascimento e a estabilidade dos demais campos,
+os datasets 10×100 das
 vítimas, o pareamento benigno/adversário, escopos de perda, ordem canônica,
-anotações, colisões e manifestos sem textos, valores ou identificadores brutos.
+anotações, colisões, round-trip JSONL e manifestos sem textos, valores ou
+identificadores brutos.
 
 ## Limites
 

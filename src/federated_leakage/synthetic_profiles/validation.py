@@ -15,6 +15,8 @@ from .conversations import (
 from .documents import cpf_has_valid_checksum, rg_has_valid_reference_checksum
 from .model import (
     AUXILIARY_ROUND_SCHEMA_VERSION,
+    BIRTH_DATE_END,
+    BIRTH_DATE_START,
     CONVERSATION_SCHEMA_VERSION,
     PROFILE_FIELD_ORDER,
     PROFILE_SCHEMA_VERSION,
@@ -35,8 +37,6 @@ _RG_PATTERN = re.compile(r"^\d{2}\.\d{3}\.\d{3}-[0-9X]$")
 _PHONE_PATTERN = re.compile(r"^\+55 00 9\d{4}-\d{4}$")
 _EMAIL_PATTERN = re.compile(r"^[a-z0-9.]+@synthetic\.invalid$")
 _ENTITY_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-_BIRTH_DATE_START = date(1940, 1, 1)
-_BIRTH_DATE_END = date(2005, 12, 31)
 _APPOINTMENT_DATE_START = date(2026, 1, 1)
 _APPOINTMENT_DATE_END = date(2027, 12, 31)
 _APPOINTMENT_START = time(8, 0)
@@ -60,7 +60,7 @@ def validate_profile(profile: SyntheticProfile) -> None:
         raise ProfileValidationError("entity_id inválido")
     if not profile.person_name.strip():
         raise ProfileValidationError("PERSON_NAME vazio")
-    if not _BIRTH_DATE_START <= profile.birth_date <= _BIRTH_DATE_END:
+    if not BIRTH_DATE_START <= profile.birth_date <= BIRTH_DATE_END:
         raise ProfileValidationError("BIRTH_DATE está fora da faixa permitida")
     if not _CPF_PATTERN.fullmatch(profile.cpf) or cpf_has_valid_checksum(profile.cpf):
         raise ProfileValidationError("CPF não está no formato sintético inválido")
@@ -112,7 +112,7 @@ def validate_profile_collection(
     *,
     reserved_values: Optional[Mapping[str, Iterable[str]]] = None,
 ) -> None:
-    """Rejeita colisões, exceto datas e horários de atendimento."""
+    """Rejeita colisões, exceto nascimento e data/horário de atendimento."""
 
     mutable_seen = {field_type: set() for field_type in UNIQUE_FIELD_TYPES}
     if reserved_values:

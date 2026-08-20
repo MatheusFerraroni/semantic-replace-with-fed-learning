@@ -186,6 +186,36 @@ class ConversationGeneratorTests(unittest.TestCase):
             self.auxiliary.generate(round_id, presentation="benign")
             for round_id in range(1, 21)
         ]
+        validate_conversation_preflight(datasets, full_schedule)
+
+        def birth_dates(conversation_collections):
+            return {
+                annotation.value
+                for conversations in conversation_collections
+                for conversation in conversations
+                if conversation.kind == "protected"
+                for annotation in conversation.annotations
+                if annotation.field_type == "BIRTH_DATE"
+            }
+
+        victim_birth_dates = birth_dates(
+            dataset.conversations for dataset in datasets
+        )
+        auxiliary_birth_dates = birth_dates(
+            round_data.conversations for round_data in full_schedule
+        )
+        self.assertTrue(victim_birth_dates & auxiliary_birth_dates)
+
+        birth_date = next(
+            annotation.value
+            for annotation in original.annotations
+            if annotation.field_type == "BIRTH_DATE"
+        )
+        validate_conversation_preflight(
+            datasets,
+            full_schedule,
+            reserved_values={"BIRTH_DATE": [birth_date]},
+        )
         with self.assertRaises(ConversationValidationError) as preflight_context:
             validate_conversation_preflight(
                 datasets,

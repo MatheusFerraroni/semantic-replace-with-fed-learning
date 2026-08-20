@@ -14,7 +14,13 @@ from .conversations import (
     render_protected_conversation,
 )
 from .documents import format_invalid_cpf, format_invalid_rg, format_non_routable_phone
-from .model import AuxiliaryPresentation, AuxiliaryRound, SyntheticProfile
+from .model import (
+    BIRTH_DATE_END,
+    BIRTH_DATE_START,
+    AuxiliaryPresentation,
+    AuxiliaryRound,
+    SyntheticProfile,
+)
 from .seeding import derive_integer, derive_key, permuted_index, permuted_tuple
 from .validation import validate_auxiliary_round, validate_profile
 
@@ -25,9 +31,7 @@ PROFILES_PER_ROUND = 80
 GENERAL_RECORDS_PER_ROUND = 20
 TOTAL_AUXILIARY_PROFILES = AUXILIARY_ROUNDS * PROFILES_PER_ROUND
 
-_BIRTH_DATE_START = date(1940, 1, 1)
-_BIRTH_DATE_END = date(2005, 12, 31)
-_BIRTH_DATE_DOMAIN = (_BIRTH_DATE_END - _BIRTH_DATE_START).days + 1
+_BIRTH_DATE_DOMAIN = (BIRTH_DATE_END - BIRTH_DATE_START).days + 1
 
 _APPOINTMENT_DATE_START = date(2026, 1, 1)
 _APPOINTMENT_DATE_END = date(2027, 12, 31)
@@ -61,7 +65,7 @@ def _assert_faker_version() -> None:
 
 
 class _SyntheticProfileFactory:
-    """Primitiva compartilhada que preserva a geração auxiliar v1."""
+    """Primitiva compartilhada que altera somente BIRTH_DATE no gerador v2."""
 
     def __init__(self, stream_key: bytes, *, locale: str) -> None:
         self._stream_key = stream_key
@@ -97,11 +101,8 @@ class _SyntheticProfileFactory:
         )
         entity_id = derive_key(profile_key, "ENTITY_ID").hex()
 
-        birth_offset = permuted_index(
-            self._stream_key,
-            "BIRTH_DATE/v1",
-            position,
-            _BIRTH_DATE_DOMAIN,
+        birth_offset = (
+            derive_integer(profile_key, "BIRTH_DATE/v2") % _BIRTH_DATE_DOMAIN
         )
         cpf_base = permuted_index(
             self._stream_key,
@@ -132,7 +133,7 @@ class _SyntheticProfileFactory:
         profile = SyntheticProfile(
             entity_id=entity_id,
             person_name=self._person_name(profile_key, position),
-            birth_date=_BIRTH_DATE_START + timedelta(days=birth_offset),
+            birth_date=BIRTH_DATE_START + timedelta(days=birth_offset),
             cpf=format_invalid_cpf(cpf_base),
             rg=format_invalid_rg(rg_base),
             phone=format_non_routable_phone(phone_base),

@@ -2,10 +2,12 @@
 
 ## Objetivo
 
-O gerador cria perfis e conversas inteiramente sintéticos e reproduzíveis sem
-gravar seus valores no cliente auxiliar. A mesma entrada sempre reconstrói o
-mesmo conjunto, enquanto rodada ou índice auxiliar diferentes produzem uma
-entidade diferente. Os dez datasets das vítimas são estáveis entre rodadas.
+O gerador cria perfis e conversas inteiramente sintéticos e reproduzíveis. Os
+perfis tipados e as chaves não são gravados; as conversas validadas podem ser
+publicadas em JSONL no diretório atribuído ao cliente. A mesma entrada sempre
+reconstrói o mesmo conjunto, enquanto rodada ou índice auxiliar diferentes
+produzem uma entidade diferente. Os dez datasets das vítimas são estáveis entre
+rodadas.
 
 O código está em `src/federated_leakage/synthetic_profiles/`. Ele não depende de
 dados reais, arquivos montados, bancos ou serviços externos.
@@ -57,8 +59,10 @@ derivação não inclui rodada, cenário nem `k`.
    adversária mantém somente o segmento canônico.
 4. O validador verifica formato, checksum inválido, ordem, anotações, perda,
    pareamento e colisões.
-5. O chamador tokeniza cada amostra uma vez e executa o treinamento local.
-6. O cliente descarta o objeto da rodada; nenhum perfil bruto é serializado.
+5. O cliente pode publicar as 100 conversas em seu próprio JSONL validado.
+6. O chamador carrega o arquivo, tokeniza cada amostra uma vez e executa o
+   treinamento local.
+7. O cliente descarta o perfil tipado; nenhuma chave é serializada.
 
 Nos 80 registros adversários, a perda começa depois do prefixo e cobre a
 continuação canônica completa. As 20 conversas gerais usam perda integral nas
@@ -71,7 +75,8 @@ rodada e configuração reconstroem exatamente os mesmos objetos.
 
 - `PERSON_NAME`: nome `pt_BR` com pseudossobrenome determinístico que impede
   repetição dentro do fluxo;
-- `BIRTH_DATE`: data em uma faixa fixa e sem repetição dentro do fluxo;
+- `BIRTH_DATE`: data entre `1966-01-01` e `2006-12-31`, equivalente a 20–60
+  anos na referência fixa `2026-12-31`, com repetição permitida;
 - `CPF`: aparência preservada e segundo dígito verificador deliberadamente
   incorreto;
 - `RG`: formato de nove posições e dígito deliberadamente incompatível com a
@@ -83,14 +88,30 @@ rodada e configuração reconstroem exatamente os mesmos objetos.
 - `APPOINTMENT_TIME`: horário entre `08:00` e `18:45`, em intervalos de 15
   minutos, com repetição permitida.
 
-Data e horário de atendimento podem se repetir separadamente ou como a mesma
-combinação. Os demais tipos continuam sujeitos à verificação de colisão entre
-todos os conjuntos experimentais.
+Data de nascimento, data e horário de atendimento podem se repetir separadamente
+ou em combinação. Nome, CPF, RG, telefone, e-mail e endereço continuam sujeitos
+à verificação de colisão entre todos os conjuntos experimentais.
 
 ## Persistência
 
-O gerador não oferece exportação de perfis ou conversas. Os únicos artefatos
-graváveis são manifestos sem conteúdo protegido, contendo:
+`storage.py` publica uma conversa por linha, em JSON canônico UTF-8 com `LF`, em:
+
+```text
+outputs/datasets/<dataset_id>/
+├── trusted/manifests/
+└── clients/
+    ├── victim/<client_id>/conversations.jsonl
+    └── auxiliary/<schedule_id>/<presentation>/round-001/conversations.jsonl
+```
+
+Cada JSONL possui `metadata.json` adjacente com versões, identidade lógica,
+contagem e SHA-256 dos bytes. Escrita é exclusiva e atômica; leitura rejeita
+campos desconhecidos, conteúdo adulterado, identidade divergente e caminhos
+inseguros. O bundle deve ficar em `outputs/`, já ignorado pelo Git. O chamador
+entrega a cada componente somente seu caminho; a raiz não é compartilhada com o
+servidor nem com o auxiliar adversário.
+
+Os manifestos continuam sem conteúdo protegido e contêm:
 
 - versões do esquema, gerador e Faker;
 - número da rodada, apresentação e contagens auxiliares;
@@ -98,10 +119,10 @@ graváveis são manifestos sem conteúdo protegido, contendo:
 - hashes agregados e por cliente dos datasets das vítimas;
 - hashes do template canônico e do catálogo.
 
-O arquivo `round_auxiliary_manifest.jsonl` fica no diretório externo da
-execução, e `victim_dataset_manifest.json` resume os dez clientes. Ambos ficam
-fora do Git. A chave mestra ou sua referência protegida, a rodada concluída e os
-hashes entram no ponto de restauração do executor confiável.
+`victim_dataset_manifest.json` fica em `trusted/manifests/`; o manifesto auxiliar
+continua associado à execução da rodada. Nenhum manifesto ou metadado contém
+texto, valor protegido, anotação ou `entity_id`. Chaves mestras e de fluxo nunca
+entram no bundle.
 
 ## Uso
 
@@ -110,7 +131,13 @@ from federated_leakage.synthetic_profiles import (
     AuxiliaryRoundGenerator,
     VictimDatasetGenerator,
     derive_stream_key,
+    read_auxiliary_round,
+    read_victim_client_dataset,
+    write_auxiliary_round,
+    write_victim_datasets,
 )
+
+from pathlib import Path
 
 auxiliary_key = derive_stream_key(
     trusted_master_key,
@@ -131,7 +158,19 @@ victim_key = derive_stream_key(
 )
 victim_datasets = VictimDatasetGenerator(victim_key).generate()
 
-# Entregue somente um VictimClientDataset ao respectivo cliente.
+output_root = Path("outputs/datasets")
+dataset_id = "seed-11-main-v2"
+write_victim_datasets(output_root, dataset_id, victim_datasets)
+write_auxiliary_round(output_root, dataset_id, "F0-F1", benign_round)
+
+# Cada consumidor abre somente seu próprio caminho lógico.
+victim_01 = read_victim_client_dataset(
+    output_root, dataset_id, "victim-01"
+)
+auxiliary_round_01 = read_auxiliary_round(
+    output_root, dataset_id, "F0-F1", "benign", 1
+)
+
 # Depois do treinamento local, descarte os objetos em memória.
 del benign_round, adversarial_round, victim_datasets
 ```

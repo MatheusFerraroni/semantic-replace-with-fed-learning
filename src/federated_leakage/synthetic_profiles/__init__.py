@@ -24,6 +24,9 @@ from .manifest import (
 )
 from .model import (
     AUXILIARY_ROUND_SCHEMA_VERSION,
+    BIRTH_DATE_AGE_REFERENCE,
+    BIRTH_DATE_END,
+    BIRTH_DATE_START,
     CONVERSATION_GENERATOR_VERSION,
     CONVERSATION_SCHEMA_VERSION,
     DUPLICATE_ALLOWED_FIELD_TYPES,
@@ -35,6 +38,8 @@ from .model import (
     ConversationKind,
     FieldAnnotation,
     LossScope,
+    MAXIMUM_AGE_YEARS,
+    MINIMUM_AGE_YEARS,
     RenderedProfile,
     SyntheticProfile,
     TrainingConversation,
@@ -48,6 +53,15 @@ from .rendering import (
     render_profile,
 )
 from .seeding import derive_stream_key
+from .storage import (
+    ARTIFACT_METADATA_SCHEMA_VERSION,
+    CONVERSATION_JSONL_SCHEMA_VERSION,
+    DatasetStorageError,
+    read_auxiliary_round,
+    read_victim_client_dataset,
+    write_auxiliary_round,
+    write_victim_datasets,
+)
 from .validation import (
     ConversationValidationError,
     ProfileValidationError,
@@ -70,11 +84,16 @@ from .victims import (
 
 __all__ = [
     "ADVERSARIAL_TEMPLATE_ID",
+    "ARTIFACT_METADATA_SCHEMA_VERSION",
     "AUXILIARY_ROUND_SCHEMA_VERSION",
     "AUXILIARY_ROUNDS",
+    "BIRTH_DATE_AGE_REFERENCE",
+    "BIRTH_DATE_END",
+    "BIRTH_DATE_START",
     "CONVERSATIONS_PER_VICTIM_CLIENT",
     "CONVERSATION_CATALOG_VERSION",
     "CONVERSATION_GENERATOR_VERSION",
+    "CONVERSATION_JSONL_SCHEMA_VERSION",
     "CONVERSATION_SCHEMA_VERSION",
     "ConversationKind",
     "GENERAL_RECORDS_PER_ROUND",
@@ -83,6 +102,8 @@ __all__ = [
     "PROFILES_PER_ROUND",
     "PROTECTED_NATURAL_TEMPLATE_IDS",
     "LossScope",
+    "MAXIMUM_AGE_YEARS",
+    "MINIMUM_AGE_YEARS",
     "AuxiliaryPresentation",
     "VICTIM_CLIENTS",
     "VICTIM_DATASET_SCHEMA_VERSION",
@@ -92,6 +113,7 @@ __all__ = [
     "CANONICAL_PREFIX_TEMPLATE",
     "CANONICAL_PROFILE_TEMPLATE",
     "DUPLICATE_ALLOWED_FIELD_TYPES",
+    "DatasetStorageError",
     "FieldAnnotation",
     "PROFILE_FIELD_ORDER",
     "ProfileValidationError",
@@ -109,6 +131,8 @@ __all__ = [
     "cpf_has_valid_checksum",
     "derive_stream_key",
     "profile_field_values",
+    "read_auxiliary_round",
+    "read_victim_client_dataset",
     "render_general_conversation",
     "render_profile",
     "render_protected_conversation",
@@ -122,5 +146,7 @@ __all__ = [
     "validate_rendered_profile",
     "validate_training_conversation",
     "validate_victim_dataset",
+    "write_auxiliary_round",
+    "write_victim_datasets",
     "write_victim_dataset_manifest",
 ]

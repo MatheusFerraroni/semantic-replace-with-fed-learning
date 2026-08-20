@@ -156,10 +156,12 @@ Regras de segurança dos valores:
 - telefones e endereços usam padrões deliberadamente não roteáveis ou marcados
   como sintéticos;
 - nomes são únicos dentro da semente e não revelam cliente, papel ou perfil;
-- nome, data de nascimento, CPF, RG, telefone, e-mail e endereço são únicos
-  dentro do mesmo tipo entre vítimas, auxiliar, controles e substituições;
-- data e horário de atendimento podem se repetir, separadamente ou como a mesma
-  combinação, entre entidades, clientes e rodadas;
+- nome, CPF, RG, telefone, e-mail e endereço são únicos dentro do mesmo tipo
+  entre vítimas, auxiliar, controles e substituições;
+- datas de nascimento ficam entre `1966-01-01` e `2006-12-31`, equivalentes a
+  20–60 anos na referência fixa `2026-12-31`, e podem se repetir;
+- data e horário de atendimento também podem se repetir, separadamente ou como
+  a mesma combinação, entre entidades, clientes e rodadas;
 - horários de atendimento ficam entre `08:00` e `18:45` e usam somente minutos
   `00`, `15`, `30` ou `45`;
 - todo campo é anotado por `entity_id`, tipo, deslocamentos e valor;
@@ -209,10 +211,10 @@ update_transformation: none
 ```
 
 No início de cada rodada, o cliente auxiliar gera localmente 80 perfis completos
-e 20 conversas gerais sem dados de perfil. Perfis, nomes, datas de nascimento,
-documentos, telefones, e-mails e endereços auxiliares não são reutilizados em
-outra amostra ou rodada. Datas e horários de atendimento são as únicas exceções
-e podem se repetir. A derivação determinística usa HMAC-SHA-256 e separa pelo
+e 20 conversas gerais sem dados de perfil. Perfis, nomes, documentos, telefones,
+e-mails e endereços auxiliares não são reutilizados em outra amostra ou rodada.
+Datas de nascimento e datas e horários de atendimento são as exceções e podem se
+repetir. A derivação determinística usa HMAC-SHA-256 e separa pelo
 menos a semente da execução, o par de cenários, o fluxo auxiliar, a rodada, o
 índice da amostra e o campo. Cenário benigno/adversário e `k` não entram nessa
 derivação.
@@ -226,9 +228,10 @@ gatilhos ou valores pertence à ablação adaptativa.
 A chave mestra da geração fica somente com o executor confiável. Cada papel
 recebe apenas uma chave de fluxo derivada; em particular, o cliente auxiliar
 jamais recebe material que permita derivar os fluxos das vítimas, dos controles
-ou das substituições. O perfil bruto não é escrito em disco pelo auxiliar. A
-rodada é materializada em memória, tokenizada uma vez, usada no treinamento e
-descartada.
+ou das substituições. O perfil tipado e as chaves não são escritos em disco. A
+rodada é materializada localmente e suas conversas validadas podem ser publicadas
+no JSONL atribuído ao auxiliar antes de serem carregadas, tokenizadas uma vez e
+usadas no treinamento.
 
 Para preservar o pareamento sem compartilhar arquivos, F0/F1, F2/F3 e F4/F5
 reconstroem independentemente a mesma agenda auxiliar da rodada a partir da
@@ -542,9 +545,11 @@ t de 95% são descritivos; não há alegação de significância.
 
 A execução falha se:
 
-- houver colisão de nome, data de nascimento, CPF, RG, telefone, e-mail ou
-  endereço, dentro do mesmo tipo, entre vítimas, auxiliar, controles e
-  substituições; repetições de data e horário de atendimento são permitidas;
+- houver colisão de nome, CPF, RG, telefone, e-mail ou endereço, dentro do mesmo
+  tipo, entre vítimas, auxiliar, controles e substituições; repetições de data de
+  nascimento e de data e horário de atendimento são permitidas;
+- uma data de nascimento ficar fora de `1966-01-01`–`2006-12-31` ou representar
+  idade fora de 20–60 anos na referência fixa `2026-12-31`;
 - algum horário de atendimento não usar minutos `00`, `15`, `30` ou `45`, ou
   ficar fora da faixa de `08:00` a `18:45`;
 - algum CPF tiver checksum válido;
@@ -559,9 +564,9 @@ A execução falha se:
 - instruções, gerações, métricas ou resultados da auditoria forem compartilhados
   com o adversário;
 - o cliente adversário não gerar seus dados localmente no início de cada rodada;
-- um perfil, nome, data de nascimento, documento, telefone, e-mail ou endereço
-  auxiliar for reutilizado entre amostras ou rodadas; datas e horários de
-  atendimento podem se repetir;
+- um perfil, nome, documento, telefone, e-mail ou endereço auxiliar for
+  reutilizado entre amostras ou rodadas; datas de nascimento e datas e horários
+  de atendimento podem se repetir;
 - os pares benigno/adversário não reconstruírem a mesma agenda auxiliar;
 - a repetição de uma rodada não recriar os mesmos dados após falha;
 - um exemplo adversário contiver nome de vítima;
@@ -603,6 +608,7 @@ protected_value_registry_evaluator_only.json
 semantic_substitution_manifest_evaluator_only.jsonl
 checkpoints/
 plots/
+outputs/datasets/<dataset_id>/clients/
 ```
 
 Os três artefatos `evaluator_only` ficam fora do Git e são legíveis somente pelo
@@ -613,9 +619,11 @@ gerações, métricas ou resultados ao adversário.
 `victim_dataset_manifest.json`, `client_assignment_manifest.json` e
 `round_auxiliary_manifest.jsonl` registram somente versões, contagens,
 identificadores internos e hashes. Nenhum deles pode conter nomes, textos
-renderizados nem outros valores protegidos. O registro bruto necessário à
-auditoria pode ser regenerado em memória pelo avaliador a partir de sua chave ou
-mantido exclusivamente nos artefatos `evaluator_only` fora do Git.
+renderizados nem outros valores protegidos. As conversas JSONL são a única
+exceção de persistência bruta: ficam em `outputs/datasets/<dataset_id>/`, são
+escritas de forma atômica, não entram no Git e cada consumidor recebe somente o
+caminho de seu cliente, agenda, apresentação e rodada. Perfis tipados e chaves
+continuam apenas em memória.
 
 Pontos de restauração permanentes ficam nas rodadas 1, 10 e 20. O ponto de
 restauração para retomada é gravado atomicamente após agregação e auditoria. Ele

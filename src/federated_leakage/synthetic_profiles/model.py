@@ -1,4 +1,4 @@
-"""Contratos de dados mantidos somente em memória pelo gerador sintético."""
+"""Contratos sintéticos validados antes de uso em memória ou JSONL local."""
 
 from dataclasses import dataclass
 from datetime import date, time
@@ -6,11 +6,17 @@ from typing import Dict, Literal, Optional, Tuple
 
 
 PROFILE_SCHEMA_VERSION = "synthetic-profile/v1"
-GENERATOR_VERSION = "synthetic-profile-generator/v1"
+GENERATOR_VERSION = "synthetic-profile-generator/v2"
 CONVERSATION_SCHEMA_VERSION = "training-conversation/v1"
 CONVERSATION_GENERATOR_VERSION = "training-conversation-generator/v1"
 VICTIM_DATASET_SCHEMA_VERSION = "victim-client-dataset/v1"
 AUXILIARY_ROUND_SCHEMA_VERSION = "auxiliary-round/v2"
+
+BIRTH_DATE_START = date(1966, 1, 1)
+BIRTH_DATE_END = date(2006, 12, 31)
+BIRTH_DATE_AGE_REFERENCE = date(2026, 12, 31)
+MINIMUM_AGE_YEARS = 20
+MAXIMUM_AGE_YEARS = 60
 
 ConversationKind = Literal["protected", "general"]
 LossScope = Literal["all_tokens", "canonical_completion"]
@@ -31,7 +37,6 @@ PROFILE_FIELD_ORDER = (
 UNIQUE_FIELD_TYPES = frozenset(
     {
         "PERSON_NAME",
-        "BIRTH_DATE",
         "CPF",
         "RG",
         "PHONE",
@@ -41,7 +46,7 @@ UNIQUE_FIELD_TYPES = frozenset(
 )
 
 DUPLICATE_ALLOWED_FIELD_TYPES = frozenset(
-    {"APPOINTMENT_DATE", "APPOINTMENT_TIME"}
+    {"BIRTH_DATE", "APPOINTMENT_DATE", "APPOINTMENT_TIME"}
 )
 
 
@@ -85,7 +90,7 @@ class RenderedProfile:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TrainingConversation:
-    """Conversa validada antes da tokenização, mantida somente em memória."""
+    """Conversa validada antes da serialização local e da tokenização."""
 
     text: str
     entity_id: str
@@ -102,7 +107,7 @@ class TrainingConversation:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class VictimClientDataset:
-    """As 100 conversas locais de um único cliente-vítima."""
+    """As 100 conversas locais serializáveis de um único cliente-vítima."""
 
     client_id: str
     conversations: Tuple[TrainingConversation, ...]
@@ -111,7 +116,7 @@ class VictimClientDataset:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AuxiliaryRound:
-    """Dados efêmeros de uma rodada; o chamador descarta este objeto ao final."""
+    """Dados locais de uma rodada, opcionalmente publicados no JSONL do cliente."""
 
     round_id: int
     presentation: AuxiliaryPresentation

@@ -3,14 +3,20 @@ import json
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 
 from federated_leakage.synthetic_profiles import (
     AUXILIARY_ROUNDS,
+    BIRTH_DATE_AGE_REFERENCE,
+    BIRTH_DATE_END,
+    BIRTH_DATE_START,
     CANONICAL_COMPLETION_TEMPLATE,
     CANONICAL_PREFIX_TEMPLATE,
     CANONICAL_PROFILE_TEMPLATE,
     DUPLICATE_ALLOWED_FIELD_TYPES,
+    MAXIMUM_AGE_YEARS,
+    MINIMUM_AGE_YEARS,
     PROFILE_FIELD_ORDER,
     PROFILES_PER_ROUND,
     UNIQUE_FIELD_TYPES,
@@ -29,7 +35,8 @@ from federated_leakage.synthetic_profiles import (
 
 MASTER_KEY = bytes(range(32))
 V1_SCHEDULE_SHA256 = "e403ae7789716bf801487281a9497be258bed2467ec617b7e6de51c02eeadd13"
-V1_BATCH_SHA256 = "a06e0590d6c0745b49a570cf522edbc15f0d68fe651bc6996318abb8b7db606a"
+V1_NON_BIRTH_VALUES_SHA256 = "302116e4bc9061d0db820525df0e16cfcd8e0a858b59f89a8dcb3a0e664d0702"
+V2_BATCH_SHA256 = "424be41b5146e16983bb4d08e3d5f593951593202d3c08c592670303354aa022"
 V1_TEMPLATE_SHA256 = "14773a9f23de878a7680ff0e6ceb33fdc16dd877e1abe5950f024905fa5546ec"
 
 
@@ -55,7 +62,7 @@ class SyntheticProfileGeneratorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.generator = AuxiliaryRoundGenerator(auxiliary_key())
 
-    def test_v1_profile_and_general_record_regression(self) -> None:
+    def test_v2_birth_date_and_v1_non_birth_regression(self) -> None:
         profiles = [
             self.generator.generate_profile(1, sample_index)
             for sample_index in range(PROFILES_PER_ROUND)
@@ -81,7 +88,19 @@ class SyntheticProfileGeneratorTests(unittest.TestCase):
                 [render_profile(profile).text for profile in profiles]
                 + general_records
             ),
-            V1_BATCH_SHA256,
+            V2_BATCH_SHA256,
+        )
+        non_birth_values = []
+        for profile in profiles:
+            values = profile_field_values(profile)
+            non_birth_values.extend(
+                f"{field_type}\t{values[field_type]}"
+                for field_type in PROFILE_FIELD_ORDER
+                if field_type != "BIRTH_DATE"
+            )
+        self.assertEqual(
+            sha256_lines(non_birth_values),
+            V1_NON_BIRTH_VALUES_SHA256,
         )
         self.assertEqual(
             hashlib.sha256(CANONICAL_PROFILE_TEMPLATE.encode("utf-8")).hexdigest(),
@@ -118,20 +137,68 @@ class SyntheticProfileGeneratorTests(unittest.TestCase):
 
         validate_profile_collection(profiles)
 
-    def test_appointment_date_and_time_may_repeat(self) -> None:
+    def test_birth_and_appointment_values_may_repeat(self) -> None:
         first = self.generator.generate_profile(1, 0)
         second = self.generator.generate_profile(1, 1)
-        repeated_appointment = replace(
+        repeated_allowed_values = replace(
             second,
+            birth_date=first.birth_date,
             appointment_date=first.appointment_date,
             appointment_time=first.appointment_time,
         )
 
-        validate_profile_collection([first, repeated_appointment])
+        validate_profile_collection([first, repeated_allowed_values])
         self.assertEqual(
             DUPLICATE_ALLOWED_FIELD_TYPES,
-            frozenset({"APPOINTMENT_DATE", "APPOINTMENT_TIME"}),
+            frozenset(
+                {"BIRTH_DATE", "APPOINTMENT_DATE", "APPOINTMENT_TIME"}
+            ),
         )
+
+    def test_birth_dates_have_reproducible_age_range(self) -> None:
+        profiles = [
+            self.generator.generate_profile(round_id, sample_index)
+            for round_id in range(1, AUXILIARY_ROUNDS + 1)
+            for sample_index in range(PROFILES_PER_ROUND)
+        ]
+        for profile in profiles:
+            self.assertGreaterEqual(profile.birth_date, BIRTH_DATE_START)
+            self.assertLessEqual(profile.birth_date, BIRTH_DATE_END)
+            age = BIRTH_DATE_AGE_REFERENCE.year - profile.birth_date.year - (
+                (
+                    BIRTH_DATE_AGE_REFERENCE.month,
+                    BIRTH_DATE_AGE_REFERENCE.day,
+                )
+                < (profile.birth_date.month, profile.birth_date.day)
+            )
+            self.assertGreaterEqual(age, MINIMUM_AGE_YEARS)
+            self.assertLessEqual(age, MAXIMUM_AGE_YEARS)
+
+        reference = profiles[0]
+        validate_profile_collection(
+            [replace(reference, birth_date=BIRTH_DATE_START)]
+        )
+        validate_profile_collection(
+            [replace(reference, birth_date=BIRTH_DATE_END)]
+        )
+        with self.assertRaises(ProfileValidationError):
+            validate_profile_collection(
+                [
+                    replace(
+                        reference,
+                        birth_date=BIRTH_DATE_START - timedelta(days=1),
+                    )
+                ]
+            )
+        with self.assertRaises(ProfileValidationError):
+            validate_profile_collection(
+                [
+                    replace(
+                        reference,
+                        birth_date=BIRTH_DATE_END + timedelta(days=1),
+                    )
+                ]
+            )
 
     def test_disallowed_collision_fails_without_exposing_the_value(self) -> None:
         first = self.generator.generate_profile(1, 0)
