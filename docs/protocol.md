@@ -40,6 +40,10 @@ para os dados, o ataque, a auditoria e as defesas. Os valores de execução fica
 em `configs/main-v1.yaml`; a configuração resolvida deve falhar se divergir deste
 documento.
 
+Este documento especifica também etapas futuras da campanha. O estado executável
+de cada componente é mantido no README; uma seção normativa aqui não implica que
+o respectivo treinamento, defesa ou auditoria já esteja implementado.
+
 ## 2. Modelo e limites
 
 O modelo de referência é:
@@ -376,8 +380,8 @@ memória, mas o estado de um cliente nunca inicializa o seguinte.
 
 ### 7.1 DP-SGD
 
-A unidade de privacidade da versão atual é cada conversa. Os oito campos não
-fornecidos na instrução aparecem juntos, com o nome, em quatro conversas
+A unidade de privacidade da versão especificada é cada conversa. Os oito campos
+não fornecidos na instrução aparecem juntos, com o nome, em quatro conversas
 distintas do mesmo participante; a quinta conversa não contém dados nem fatos
 individualizados. Assim, cada cliente possui 100 unidades de privacidade, das
 quais 80 contêm registros protegidos completos e 20 são gerais.

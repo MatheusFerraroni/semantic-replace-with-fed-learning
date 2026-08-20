@@ -3,6 +3,7 @@
   "$id": "https://federated-leakage.invalid/schemas/model-artifact-v1.schema.json",
   "title": "Tucano 2 model artifact manifest v1",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "schema_version",
     "artifact_id",
@@ -22,23 +23,24 @@
     },
     "artifact_id": {
       "type": "string",
-      "minLength": 1,
-      "maxLength": 128
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
     },
     "format": {
       "const": "transformers_pretrained"
     },
     "parent_model": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["model_id", "revision", "license"],
       "properties": {
-        "model_id": {"type": "string", "minLength": 1},
-        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-        "license": {"type": "string", "minLength": 1}
+        "model_id": {"const": "Polygl0t/Tucano2-0.6B-Base"},
+        "revision": {"const": "dad97dc864a8f9a1d240fb9351d098f3af9511d7"},
+        "license": {"const": "Apache-2.0"}
       }
     },
     "architecture": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "model_type",
         "parameter_count",
@@ -46,14 +48,15 @@
         "training_sequence_length"
       ],
       "properties": {
-        "model_type": {"type": "string", "minLength": 1},
-        "parameter_count": {"type": "integer", "minimum": 1},
-        "native_context_length": {"type": "integer", "minimum": 1},
-        "training_sequence_length": {"type": "integer", "minimum": 1}
+        "model_type": {"const": "llama"},
+        "parameter_count": {"const": 670127616},
+        "native_context_length": {"const": 4096},
+        "training_sequence_length": {"const": 1024}
       }
     },
     "tokenizer": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "fingerprint_sha256",
         "files",
@@ -65,24 +68,26 @@
       ],
       "properties": {
         "fingerprint_sha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
+          "const": "069e8fecbf6a1e7adc2941a53408306827516f11418998a295e2c4d0e24d3ae7"
         },
         "files": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1}
+          "const": [
+            "added_tokens.json",
+            "special_tokens_map.json",
+            "tokenizer.json",
+            "tokenizer_config.json"
+          ]
         },
-        "vocab_size": {"type": "integer", "minimum": 1},
-        "bos_token_id": {"type": ["integer", "null"]},
-        "eos_token_id": {"type": ["integer", "null"]},
-        "pad_token_id": {"type": ["integer", "null"]},
-        "unk_token_id": {"type": ["integer", "null"]}
+        "vocab_size": {"const": 49152},
+        "bos_token_id": {"const": 1},
+        "eos_token_id": {"const": 2},
+        "pad_token_id": {"const": 49109},
+        "unk_token_id": {"const": 0}
       }
     },
     "training": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "method",
         "producer_git_commit",
@@ -97,7 +102,10 @@
           "type": "string",
           "pattern": "^[0-9a-f]{40}$"
         },
-        "run_id": {"type": "string", "minLength": 1},
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
         "seed": {"type": "integer", "minimum": 0},
         "resolved_config_sha256": {
           "type": "string",
@@ -111,19 +119,22 @@
     },
     "environment": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["python", "torch", "transformers", "tokenizers"],
       "properties": {
-        "python": {"type": "string", "minLength": 1},
-        "torch": {"type": "string", "minLength": 1},
-        "transformers": {"type": "string", "minLength": 1},
-        "tokenizers": {"type": "string", "minLength": 1}
+        "python": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"},
+        "torch": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"},
+        "transformers": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"},
+        "tokenizers": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"}
       }
     },
     "files": {
       "type": "array",
       "minItems": 1,
+      "uniqueItems": true,
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["path", "size_bytes", "sha256"],
         "properties": {
           "path": {"type": "string", "minLength": 1},

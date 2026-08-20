@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ from federated_leakage.model_loading import (
     LoadedModelBundle,
     LocalArtifactModelSpec,
     ModelProvenance,
+    parse_model_spec,
 )
 from federated_leakage.prepare_model import load_model_spec_from_config, main
 
@@ -60,6 +62,47 @@ class PrepareModelCliTests(unittest.TestCase):
         spec = load_model_spec_from_config(Path("configs/main-v1.yaml"))
         self.assertEqual(spec.model_id, BASE_MODEL_ID)
         self.assertEqual(spec.revision, BASE_MODEL_REVISION)
+
+    def test_reads_documented_local_artifact_example(self):
+        spec = load_model_spec_from_config(
+            Path("configs/local-artifact-v1.example.yaml")
+        )
+        self.assertIsInstance(spec, LocalArtifactModelSpec)
+        self.assertEqual(spec.expected_artifact_sha256, "0" * 64)
+
+    def test_model_artifact_yaml_examples_match_the_strict_parser(self):
+        import yaml
+
+        document = Path("docs/model-artifact-contract.md").read_text(
+            encoding="utf-8"
+        )
+        blocks = re.findall(r"```yaml\n(.*?)\n```", document, flags=re.DOTALL)
+        parsed_specs = []
+        for block in blocks:
+            value = yaml.safe_load(block)
+            if isinstance(value, dict) and isinstance(value.get("model"), dict):
+                parsed_specs.append(parse_model_spec(value["model"]))
+        self.assertEqual(len(parsed_specs), 3)
+        self.assertEqual(
+            [spec.kind for spec in parsed_specs],
+            ["huggingface", "huggingface", "local_artifact"],
+        )
+
+    def test_documented_manifest_example_matches_the_executable_schema(self):
+        import jsonschema
+
+        document = Path("docs/model-artifact-contract.md").read_text(
+            encoding="utf-8"
+        )
+        blocks = re.findall(r"```json\n(.*?)\n```", document, flags=re.DOTALL)
+        self.assertEqual(len(blocks), 1)
+        manifest = json.loads(blocks[0])
+        schema = json.loads(
+            Path(
+                "src/federated_leakage/schemas/model-artifact-v1.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        jsonschema.Draft202012Validator(schema).validate(manifest)
 
     def test_online_huggingface_prepares_and_offline_only_loads(self):
         spec = HuggingFaceModelSpec(

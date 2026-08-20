@@ -12,11 +12,12 @@ caminhos relativos.
 Enquanto o modelo refinado não estiver disponível, o consumidor usa:
 
 ```yaml
-kind: huggingface
-model_id: Polygl0t/Tucano2-0.6B-Base
-revision: dad97dc864a8f9a1d240fb9351d098f3af9511d7
-sequence_length: 1024
-result_variant: upstream_baseline
+model:
+  kind: huggingface
+  model_id: Polygl0t/Tucano2-0.6B-Base
+  revision: dad97dc864a8f9a1d240fb9351d098f3af9511d7
+  result_variant: upstream_baseline
+  max_sequence_length: 1024
 ```
 
 A revisão é imutável e identifica o ponto de verificação final publicado. Não é
@@ -36,6 +37,7 @@ O artefato refinado deve:
 - ser carregável com `AutoModelForCausalLM.from_pretrained()` e
   `AutoTokenizer.from_pretrained()` apontando somente para o diretório local;
 - usar arquivos `safetensors` para os pesos;
+- armazenar todos os parâmetros em `bfloat16`;
 - permanecer fora do Git.
 
 No contrato v1, uma mudança de tokenizador, vocabulário, arquitetura ou tokens
@@ -48,7 +50,8 @@ especiais torna o artefato incompatível e exige uma nova versão do contrato.
 ├── config.json
 ├── model.safetensors
 │   ou model-00001-of-*.safetensors + model.safetensors.index.json
-├── tokenizer.json ou os arquivos equivalentes do tokenizer
+├── added_tokens.json
+├── tokenizer.json
 ├── tokenizer_config.json
 ├── special_tokens_map.json
 ├── generation_config.json             # quando produzido pela biblioteca
@@ -63,12 +66,12 @@ pertencem ao artefato.
 ## Manifesto obrigatório
 
 `model_artifact_manifest.json` usa UTF-8, chaves em ordem determinística e
-contém, no mínimo:
+contém exatamente os campos definidos pelo schema:
 
 ```json
 {
   "schema_version": "tucano2-model-artifact/v1",
-  "artifact_id": "<identificador-estavel>",
+  "artifact_id": "refined-example-v1",
   "format": "transformers_pretrained",
   "parent_model": {
     "model_id": "Polygl0t/Tucano2-0.6B-Base",
@@ -76,51 +79,86 @@ contém, no mínimo:
     "license": "Apache-2.0"
   },
   "architecture": {
-    "model_type": "<tipo-em-config.json>",
-    "parameter_count": "<inteiro>",
+    "model_type": "llama",
+    "parameter_count": 670127616,
     "native_context_length": 4096,
     "training_sequence_length": 1024
   },
   "tokenizer": {
-    "fingerprint_sha256": "<sha256>",
-    "files": ["<caminho-relativo-em-ordem-lexicografica>"],
-    "vocab_size": "<inteiro>",
-    "bos_token_id": "<inteiro-ou-null>",
-    "eos_token_id": "<inteiro-ou-null>",
-    "pad_token_id": "<inteiro-ou-null>",
-    "unk_token_id": "<inteiro-ou-null>"
+    "fingerprint_sha256": "069e8fecbf6a1e7adc2941a53408306827516f11418998a295e2c4d0e24d3ae7",
+    "files": [
+      "added_tokens.json",
+      "special_tokens_map.json",
+      "tokenizer.json",
+      "tokenizer_config.json"
+    ],
+    "vocab_size": 49152,
+    "bos_token_id": 1,
+    "eos_token_id": 2,
+    "pad_token_id": 49109,
+    "unk_token_id": 0
   },
   "training": {
     "method": "full_parameter_continual_pretraining",
-    "producer_git_commit": "<sha>",
-    "run_id": "<id>",
-    "seed": "<inteiro>",
-    "resolved_config_sha256": "<sha256>",
-    "dataset_manifest_sha256": "<sha256>"
+    "producer_git_commit": "1111111111111111111111111111111111111111",
+    "run_id": "example-run",
+    "seed": 0,
+    "resolved_config_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "dataset_manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
   },
   "environment": {
-    "python": "<versao>",
-    "torch": "<versao>",
-    "transformers": "<versao>",
-    "tokenizers": "<versao>"
+    "python": "3.12.13",
+    "torch": "2.7.1",
+    "transformers": "4.53.2",
+    "tokenizers": "0.21.2"
   },
   "files": [
     {
-      "path": "<caminho-relativo>",
-      "size_bytes": "<inteiro>",
-      "sha256": "<sha256>"
+      "path": "added_tokens.json",
+      "size_bytes": 1086,
+      "sha256": "8115e8e75781287590331d97b65c5cff8c8aad7e03cbd4e38c73eeea8c2f2b3b"
     }
   ],
-  "artifact_sha256": "<sha256-agregado>",
+  "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "redistribution_status": "internal_research_only"
 }
 ```
 
+Os identificadores e hashes desse exemplo são ilustrativos. No artefato real,
+`files` deve conter todos os arquivos regulares e os hashes devem corresponder
+aos bytes efetivamente publicados.
+
 O manifesto não pode conter caminhos absolutos, servidores, nomes de usuário, URLs de
 registros dos corpora, textos-fonte nem valores pessoais.
 
-O esquema executável usa JSON Schema Draft 2020-12. Campos descritos como
-inteiros no exemplo devem ser inteiros JSON, não cadeias de caracteres.
+O esquema executável usa JSON Schema Draft 2020-12, rejeita chaves desconhecidas
+em todos os níveis e exige inteiros JSON nos campos numéricos.
+
+## Assinatura exata de compatibilidade
+
+O consumidor valida a seguinte assinatura antes e depois da carga:
+
+| Propriedade | Valor obrigatório |
+| --- | --- |
+| Classe causal | `LlamaForCausalLM` |
+| `model_type` | `llama` |
+| Parâmetros | `670127616` |
+| Hidden size | `1536` |
+| Intermediate size | `3072` |
+| Camadas | `28` |
+| Attention heads | `16` |
+| KV heads | `8` |
+| Vocabulário | `49152` |
+| Contexto nativo | `4096` |
+| Comprimento experimental | `1024` |
+| Dtype dos pesos | `bfloat16` |
+
+O tokenizador deve ser o fast tokenizer original, com padding à direita, sem
+adição automática de BOS ou EOS e sem remapeamento de tokens. Os IDs obrigatórios
+são `bos=1`, `eos=2`, `pad=49109` e `unk=0`, correspondentes a
+`<|im_start|>`, `<|im_end|>`, `<|pad|>` e `<|unk|>`. O fingerprint v1 dos quatro
+arquivos canônicos e desses IDs é
+`069e8fecbf6a1e7adc2941a53408306827516f11418998a295e2c4d0e24d3ae7`.
 
 ## Resumos criptográficos
 
@@ -150,18 +188,22 @@ model:
   kind: huggingface
   model_id: Polygl0t/Tucano2-0.6B-Base
   revision: dad97dc864a8f9a1d240fb9351d098f3af9511d7
-  sequence_length: 1024
+  result_variant: upstream_baseline
+  max_sequence_length: 1024
 ```
 
 ```yaml
 model:
   kind: local_artifact
   expected_schema: tucano2-model-artifact/v1
-  expected_artifact_sha256: <sha256>
-  sequence_length: 1024
+  expected_artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  max_sequence_length: 1024
 ```
 
-No modo local, o diretório é fornecido futuramente por argumento absoluto de
+O hash composto somente por zeros é um placeholder sintaticamente válido e deve
+ser substituído pelo `artifact_sha256` real antes da carga.
+
+No modo local, o diretório é fornecido por argumento absoluto de
 execução. O caminho não é versionado e não pode apontar por `..` para outro
 projeto.
 
@@ -171,7 +213,8 @@ Antes de treinar, o consumidor deverá rejeitar:
 - hash agregado ou hash de arquivo divergente;
 - arquivos obrigatórios ausentes, extras não declarados ou links simbólicos;
 - arquitetura, vocabulário, tokenizador ou tokens especiais incompatíveis;
-- contexto menor que 1.024;
+- contexto nativo diferente de 4.096 ou comprimento experimental diferente de
+  1.024;
 - adaptador isolado ou ponto de verificação que não seja um diretório Hugging
   Face completo;
 - revisão móvel ou não pinada no modo Hugging Face.

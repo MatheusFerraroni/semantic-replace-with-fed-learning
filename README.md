@@ -16,6 +16,16 @@ federado ainda não foi implementado.
 - [Configuração da campanha principal](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 
+| Componente | Estado executável |
+| --- | --- |
+| Perfis e conversas sintéticas | Implementado |
+| Persistência JSONL por cliente | Implementado |
+| Preparação e carga validada do Tucano 2 | Implementado |
+| Tokenização para treinamento | Não implementado |
+| Treinamento local e FedAvg | Não implementado |
+| DP-SGD e substituições semânticas | Não implementado |
+| Auditoria, extração e métricas | Não implementado |
+
 ## Modelo de ameaça
 
 - A federação possui 10 clientes-vítima e um slot auxiliar durante 20 rodadas.
@@ -188,12 +198,18 @@ python -m federated_leakage.prepare_model \
   --offline
 ```
 
+Os dois modos aceitam `--cache-dir` e `--device cpu|cuda|mps`. CPU é o padrão;
+um dispositivo solicitado e indisponível causa erro, sem fallback automático.
+
 Um modelo refinado usa `kind: local_artifact` e o SHA-256 esperado na seção
-`model` de uma configuração própria. Seu diretório não é registrado no YAML:
+`model` de uma configuração própria. Copie
+[`configs/local-artifact-v1.example.yaml`](configs/local-artifact-v1.example.yaml),
+substitua o hash de exemplo pelo `artifact_sha256` validado e forneça o diretório
+somente na execução:
 
 ```bash
 python -m federated_leakage.prepare_model \
-  --config /caminho/para/config-local.yaml \
+  --config configs/local-artifact-v1.example.yaml \
   --model-artifact-dir /caminho/absoluto/do/artefato
 ```
 
@@ -242,8 +258,8 @@ pesos, pontos de restauração, registros protegidos, mapas de substituição,
 arquivos temporários ou saídas de execuções. Outro modelo entra apenas pelo
 contrato de artefato e exige reexecutar toda a campanha.
 
-O DP-SGD atual usa cada conversa como unidade. Como o mesmo registro completo
-aparece em quatro conversas distintas, isso não autoriza alegação de privacidade
-no nível do participante inteiro. Mudar a unidade de privacidade ou contabilizar
-a contribuição completa exige recalcular e versionar o contabilizador antes de
-executar a campanha.
+O protocolo de DP-SGD prevê cada conversa como unidade. Como o mesmo registro
+completo aparece em quatro conversas distintas, isso não autoriza alegação de
+privacidade no nível do participante inteiro. Mudar a unidade de privacidade ou
+contabilizar a contribuição completa exige recalcular e versionar o
+contabilizador antes de executar a campanha.

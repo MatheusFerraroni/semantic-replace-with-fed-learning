@@ -57,7 +57,6 @@ SNAPSHOT_ALLOW_PATTERNS = (
     "model.safetensors.index.json",
     "special_tokens_map.json",
     "tokenizer.json",
-    "tokenizer.model",
     "tokenizer_config.json",
 )
 

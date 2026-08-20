@@ -240,6 +240,14 @@ class ModelSpecTests(unittest.TestCase):
             EXPECTED_TOKENIZER_FINGERPRINT,
         )
 
+    def test_snapshot_download_uses_only_the_canonical_tokenizer_files(self):
+        self.assertNotIn("tokenizer.model", model_loading.SNAPSHOT_ALLOW_PATTERNS)
+        self.assertTrue(
+            set(EXPECTED_TOKENIZER_FILES).issubset(
+                model_loading.SNAPSHOT_ALLOW_PATTERNS
+            )
+        )
+
     def test_parses_pinned_huggingface_and_local_specs(self):
         huggingface = parse_model_spec(
             {
@@ -341,6 +349,43 @@ class LocalArtifactValidationTests(unittest.TestCase):
                 validate_local_artifact(spec, root, dependencies=_fake_dependencies(root))
         self.assertNotIn("segredo-nao-expor", str(context.exception))
 
+    def test_schema_rejects_unknown_fields_and_unsafe_identifiers(self):
+        mutations = (
+            ("root", lambda manifest: manifest.__setitem__("unexpected", True)),
+            (
+                "nested",
+                lambda manifest: manifest["training"].__setitem__(
+                    "unexpected", True
+                ),
+            ),
+            (
+                "file-entry",
+                lambda manifest: manifest["files"][0].__setitem__(
+                    "unexpected", True
+                ),
+            ),
+            (
+                "unsafe-run-id",
+                lambda manifest: manifest["training"].__setitem__(
+                    "run_id", "../private/path"
+                ),
+            ),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                spec, manifest = _write_manifest_artifact(root)
+                mutate(manifest)
+                (root / "model_artifact_manifest.json").write_text(
+                    json.dumps(manifest), encoding="utf-8"
+                )
+                with self.assertRaisesRegex(ModelArtifactError, "schema v1"):
+                    validate_local_artifact(
+                        spec,
+                        root,
+                        dependencies=_fake_dependencies(root),
+                    )
+
     def test_rejects_relative_path_and_wrong_tokenizer_contract(self):
         spec = LocalArtifactModelSpec(
             expected_schema="tucano2-model-artifact/v1",
@@ -359,7 +404,9 @@ class LocalArtifactValidationTests(unittest.TestCase):
             (root / "model_artifact_manifest.json").write_text(
                 json.dumps(manifest), encoding="utf-8"
             )
-            with self.assertRaisesRegex(ModelArtifactError, "IDs especiais"):
+            with self.assertRaisesRegex(
+                ModelArtifactError, "schema v1.*tokenizer.bos_token_id"
+            ):
                 validate_local_artifact(spec, root, dependencies=_fake_dependencies(root))
 
     def test_rejects_manifest_path_traversal_and_wrong_expected_hash(self):
