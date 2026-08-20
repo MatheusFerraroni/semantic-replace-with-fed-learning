@@ -397,6 +397,9 @@ server:
 training:
   applies_to: victims_and_benign_auxiliary
   objective: causal_language_modeling
+  tokenized_conversation_schema_version: tokenized-conversation/v1
+  label_ignore_index: -100
+  prefix_boundary_policy: exact_token_boundary
   loss_scope: all_non_padding_tokens
   loss_reduction: mean_per_conversation_then_mean_batch
   add_bos_token: false

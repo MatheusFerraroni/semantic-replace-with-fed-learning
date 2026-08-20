@@ -34,7 +34,7 @@ seu caminho local, nunca objetos ou arquivos de outro papel.
 `TrainingConversation` contém o texto ainda não tokenizado, IDs técnicos locais,
 tipo `protected` ou `general`, anotações, template e escopo de perda. Para uma
 conversa protegida, `prefix_length` mede caracteres Unicode até o fim do prefixo;
-o futuro treinador será responsável por convertê-lo em máscara de tokens depois
+a camada `federated_leakage.tokenization` o converte em máscara de tokens depois
 de tokenizar a amostra completa uma única vez. A ordem da tupla de conversas é a
 agenda determinística; `sample_index` identifica a posição lógica anterior à
 permutação e não deve ser usado para reordenar o dataset.
@@ -68,6 +68,18 @@ estável, e a derivação não inclui rodada, cenário nem `k`.
 Nos 80 registros adversários, a perda começa depois do prefixo e cobre a
 continuação canônica completa. As 20 conversas gerais usam perda integral nas
 duas apresentações.
+
+## Tokenização em memória
+
+`tokenized-conversation/v1` mantém apenas IDs, máscaras e metadados técnicos de
+cliente, rodada e amostra. Texto, anotações, valores protegidos e `entity_id` não
+são propagados. A tokenização usa os offsets da amostra completa para exigir que
+o prefixo termine exatamente entre tokens; não há tokenização separada de campos
+ou do prefixo.
+
+O collator preserva a ordem recebida, rejeita mistura de clientes ou rodadas e
+aplica padding dinâmico à direita. Tokens e batches não são persistidos. A média
+por conversa e o treinamento local pertencem ao futuro treinador.
 
 Uma rodada incompleta é sempre descartada. Na retomada, a mesma seed, versão,
 rodada e configuração reconstroem exatamente os mesmos objetos.

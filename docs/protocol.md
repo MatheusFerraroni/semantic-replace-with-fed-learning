@@ -287,6 +287,12 @@ Nenhum campo é tokenizado separadamente. A execução valida os rótulos, os
 delimitadores, o terminador e a ordem antes de tokenizar. Primeiro se calcula a
 média da perda por conversa; depois, a média do lote lógico.
 
+A implementação `tokenized-conversation/v1` usa os offsets da única tokenização
+para exigir cobertura contínua do texto e fronteira exata do prefixo. Ela rejeita
+tokens que atravessem essa fronteira ou amostras acima de 1.024 tokens. Labels do
+prefixo e do padding usam `-100`; o padding à direita usa o token `49109`. Os
+tokens permanecem somente em memória e não constituem um novo artefato de dados.
+
 O otimizador adversário é reiniciado a cada rodada. O estado do gerador auxiliar
 necessário para retomada é persistido ou derivado de forma inequívoca. Repetir
 uma rodada após falha deve recriar exatamente as mesmas amostras, não avançar

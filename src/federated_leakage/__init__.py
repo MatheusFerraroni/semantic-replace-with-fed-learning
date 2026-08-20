@@ -22,6 +22,18 @@ from .model_loading import (
     prepare_huggingface_model,
     validate_local_artifact,
 )
+from .tokenization import (
+    LABEL_IGNORE_INDEX,
+    PAD_TOKEN_ID,
+    TOKENIZED_CONVERSATION_SCHEMA_VERSION,
+    TokenizationError,
+    TokenizedBatch,
+    TokenizedConversation,
+    collate_tokenized_conversations,
+    tokenize_training_conversation,
+    tokenize_training_conversations,
+    validate_tokenized_conversation,
+)
 
 __all__ = [
     "BASE_MODEL_ID",
@@ -30,6 +42,7 @@ __all__ = [
     "DEFAULT_MODEL_CACHE",
     "EXPECTED_PARAMETER_COUNT",
     "EXPECTED_TOKENIZER_FINGERPRINT",
+    "LABEL_IGNORE_INDEX",
     "HuggingFaceModelSpec",
     "LoadedModelBundle",
     "LocalArtifactModelSpec",
@@ -40,8 +53,17 @@ __all__ = [
     "ModelDependencyError",
     "ModelLoadError",
     "ModelProvenance",
+    "PAD_TOKEN_ID",
+    "TOKENIZED_CONVERSATION_SCHEMA_VERSION",
+    "TokenizationError",
+    "TokenizedBatch",
+    "TokenizedConversation",
+    "collate_tokenized_conversations",
     "load_model_bundle",
     "parse_model_spec",
     "prepare_huggingface_model",
+    "tokenize_training_conversation",
+    "tokenize_training_conversations",
     "validate_local_artifact",
+    "validate_tokenized_conversation",
 ]

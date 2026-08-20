@@ -21,7 +21,7 @@ federado ainda não foi implementado.
 | Perfis e conversas sintéticas | Implementado |
 | Persistência JSONL por cliente | Implementado |
 | Preparação e carga validada do Tucano 2 | Implementado |
-| Tokenização para treinamento | Não implementado |
+| Tokenização e máscaras de perda | Implementado |
 | Treinamento local e FedAvg | Não implementado |
 | DP-SGD e substituições semânticas | Não implementado |
 | Auditoria, extração e métricas | Não implementado |
@@ -218,6 +218,23 @@ chamada do Transformers. Não são permitidos links simbólicos, pesos que não 
 `safetensors`, código remoto, quantização, offload ou fallback de revisão,
 dispositivo ou origem.
 
+## Tokenizar conversas para treinamento
+
+A camada `federated_leakage.tokenization` recebe uma `TrainingConversation`
+validada e o `LoadedModelBundle`. Ela tokeniza a amostra completa uma única vez,
+sem BOS, EOS, truncamento ou packing, e devolve `tokenized-conversation/v1`
+somente em memória.
+
+Nos exemplos `all_tokens`, os labels correspondem aos IDs da conversa. Em
+`canonical_completion`, os tokens exatos do prefixo recebem `-100` e toda a
+continuação permanece supervisionada. A execução falha se um token atravessar a
+fronteira, se os offsets não cobrirem o texto continuamente ou se a amostra
+exceder 1.024 tokens. O collator aplica padding à direita com ID `49109`, máscara
+de atenção zero e label `-100`, sem misturar clientes ou rodadas.
+
+Essa camada não persiste tokens nem executa o modelo. Forward pass, redução da
+perda, gradientes, otimizador e treinamento federado continuam pendentes.
+
 ## Gerar um dataset para inspeção
 
 Depois da instalação editável, uma única seed gera os dez clientes-vítima e as
@@ -242,13 +259,18 @@ python -m unittest discover -s tests -v
 
 Os testes cobrem a regressão v4 dos e-mails, a estabilidade v3 dos demais campos,
 os datasets 10×100 das vítimas, o pareamento benigno/adversário, escopos de
-perda, ordem canônica, anotações, colisões, round-trip JSONL, manifestos seguros
-e o carregamento estrito e offline do modelo. O teste com os pesos reais é
-opt-in e exige um cache já preparado:
+perda, ordem canônica, anotações, colisões, round-trip JSONL, manifestos seguros,
+tokenização, máscaras, padding e o carregamento estrito e offline do modelo. Os
+testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
+preparado:
 
 ```bash
 FEDERATED_RUN_MODEL_SMOKE=1 \
 python -m unittest tests.test_model_smoke -v
+
+HF_HUB_OFFLINE=1 \
+FEDERATED_RUN_TOKENIZATION_SMOKE=1 \
+python -m unittest tests.test_tokenization_smoke -v
 ```
 
 ## Limites
