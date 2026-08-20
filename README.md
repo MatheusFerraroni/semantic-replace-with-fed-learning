@@ -7,8 +7,9 @@ treinamento federado de todos os parâmetros do Tucano 2 0.6B.
 ## Estado atual
 
 O repositório contém a especificação, o contrato do modelo, a configuração da
-campanha e a implementação executável dos perfis e conversas sintéticas das
-vítimas e do cliente auxiliar. O treinamento federado ainda não foi implementado.
+campanha, o carregador validado do Tucano 2 e a implementação executável dos
+perfis e conversas sintéticas das vítimas e do cliente auxiliar. O treinamento
+federado ainda não foi implementado.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
@@ -160,6 +161,47 @@ Em F4/F5, as métricas principais usam as substituições corretamente associada
 ao nome. Os valores originais servem somente para verificar a integridade do
 processo e permanecem exclusivos do avaliador.
 
+## Preparar e validar o modelo
+
+As dependências de modelo são opcionais para manter o gerador leve:
+
+```bash
+python -m pip install -e '.[model]'
+```
+
+O baseline é baixado somente por uma preparação explícita. O comando restringe
+o download aos arquivos necessários do snapshot e valida arquitetura, pesos e
+tokenizador antes de terminar:
+
+```bash
+python -m federated_leakage.prepare_model \
+  --config configs/main-v1.yaml
+```
+
+O cache padrão é `artifacts/huggingface/`, permanece fora do Git e pode ser
+alterado com `--cache-dir`. As futuras execuções usam apenas carga offline. O
+mesmo preflight pode ser repetido sem permitir rede:
+
+```bash
+python -m federated_leakage.prepare_model \
+  --config configs/main-v1.yaml \
+  --offline
+```
+
+Um modelo refinado usa `kind: local_artifact` e o SHA-256 esperado na seção
+`model` de uma configuração própria. Seu diretório não é registrado no YAML:
+
+```bash
+python -m federated_leakage.prepare_model \
+  --config /caminho/para/config-local.yaml \
+  --model-artifact-dir /caminho/absoluto/do/artefato
+```
+
+O artefato é verificado integralmente conforme o contrato v1 antes de qualquer
+chamada do Transformers. Não são permitidos links simbólicos, pesos que não sejam
+`safetensors`, código remoto, quantização, offload ou fallback de revisão,
+dispositivo ou origem.
+
 ## Gerar um dataset para inspeção
 
 Depois da instalação editável, uma única seed gera os dez clientes-vítima e as
@@ -173,20 +215,25 @@ O destino padrão é `outputs/datasets/inspection-seed-11-v4/`. A CLI aceita
 opcionalmente `--dataset-id`, `--schedule-id`, `--output-root` e `--dry-run`,
 recusa sobrescrita e só publica o bundle depois do preflight completo.
 
-## Executar os testes do gerador
+## Executar os testes
 
 Depois de ativar um ambiente virtual:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e '.[model]'
 python -m unittest discover -s tests -v
 ```
 
 Os testes cobrem a regressão v4 dos e-mails, a estabilidade v3 dos demais campos,
-os datasets 10×100 das
-vítimas, o pareamento benigno/adversário, escopos de perda, ordem canônica,
-anotações, colisões, round-trip JSONL e manifestos sem textos, valores ou
-identificadores brutos.
+os datasets 10×100 das vítimas, o pareamento benigno/adversário, escopos de
+perda, ordem canônica, anotações, colisões, round-trip JSONL, manifestos seguros
+e o carregamento estrito e offline do modelo. O teste com os pesos reais é
+opt-in e exige um cache já preparado:
+
+```bash
+FEDERATED_RUN_MODEL_SMOKE=1 \
+python -m unittest tests.test_model_smoke -v
+```
 
 ## Limites
 

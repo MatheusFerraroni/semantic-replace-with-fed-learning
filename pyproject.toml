@@ -12,6 +12,19 @@ dependencies = [
   "Faker==40.36.0",
 ]
 
+[project.optional-dependencies]
+model = [
+  "huggingface-hub==0.33.4",
+  "jsonschema==4.25.0",
+  "PyYAML==6.0.2",
+  "safetensors==0.5.3",
+  "tokenizers==0.21.2",
+  "torch==2.7.1",
+  "transformers==4.53.2",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+federated_leakage = ["schemas/*.json"]

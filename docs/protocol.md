@@ -55,6 +55,19 @@ Tokenizador, vocabulário e tokens especiais permanecem inalterados. Todas as
 condições federadas treinam todos os parâmetros. Outro modelo entra somente pelo
 [contrato do artefato](model-artifact-contract.md) e exige reexecutar B0 e F0-F5.
 
+O baseline é preparado por download explícito da revisão imutável. O consumidor
+restringe o snapshot aos arquivos necessários de configuração, tokenizador e
+pesos `safetensors`. Depois da preparação, toda carga experimental é offline e
+falha se o snapshot pinado estiver ausente ou divergente. O cache operacional
+padrão é `artifacts/huggingface/`, ignorado pelo Git, e não integra a identidade
+científica da execução.
+
+O carregador não permite código remoto, revisão móvel, quantização, offload,
+`device_map="auto"` nem fallback de origem, dtype ou dispositivo. Antes de usar
+um artefato local, ele valida schema, arquivos, tamanhos, hashes, `safetensors`,
+arquitetura, contagem de parâmetros e o fingerprint do tokenizador. Caminhos
+locais nunca entram na proveniência persistida.
+
 Somente dados sintéticos são permitidos. Dados reais, corpora externos, volumes
 montados, pesos, pontos de restauração e saídas de execução não entram no Git.
 
@@ -595,7 +608,10 @@ A execução falha se:
 - um dos oito valores originais chegar ao treinamento com substituição ativa;
 - F4 e F5 não usarem o mesmo mapa de substituições;
 - uma extração direcionada for contada sem corresponder ao nome consultado;
-- configuração, modelo, tokenizador ou comprimento divergirem dos manifestos.
+- configuração, modelo, tokenizador ou comprimento divergirem dos manifestos;
+- o baseline não estiver no cache pinado durante uma carga experimental offline;
+- um artefato de modelo contiver links, arquivos não declarados, hashes
+  divergentes, pesos não `safetensors`, arquitetura ou tokenizador incompatível.
 
 Cada execução salva fora do Git:
 
