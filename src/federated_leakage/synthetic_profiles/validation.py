@@ -18,6 +18,8 @@ from .model import (
     BIRTH_DATE_END,
     BIRTH_DATE_START,
     CONVERSATION_SCHEMA_VERSION,
+    EMAIL_DOMAINS,
+    EMAIL_LOCAL_PART_MAX_LENGTH,
     PROFILE_FIELD_ORDER,
     PROFILE_SCHEMA_VERSION,
     UNIQUE_FIELD_TYPES,
@@ -35,7 +37,7 @@ from .rendering import CANONICAL_PREFIX_TEMPLATE, CANONICAL_PROFILE_TEMPLATE
 _CPF_PATTERN = re.compile(r"^\d{3}\.\d{3}\.\d{3}-\d{2}$")
 _RG_PATTERN = re.compile(r"^\d{2}\.\d{3}\.\d{3}-[0-9X]$")
 _PHONE_PATTERN = re.compile(r"^\+55 00 9\d{4}-\d{4}$")
-_EMAIL_PATTERN = re.compile(r"^[a-z0-9.]+@synthetic\.invalid$")
+_EMAIL_LOCAL_PART_PATTERN = re.compile(r"^[a-z0-9]+(?:\.[a-z0-9]+)*$")
 _ENTITY_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _APPOINTMENT_DATE_START = date(2026, 1, 1)
 _APPOINTMENT_DATE_END = date(2027, 12, 31)
@@ -68,8 +70,15 @@ def validate_profile(profile: SyntheticProfile) -> None:
         raise ProfileValidationError("RG não está no formato sintético inválido")
     if not _PHONE_PATTERN.fullmatch(profile.phone):
         raise ProfileValidationError("PHONE não usa o padrão não roteável")
-    if not _EMAIL_PATTERN.fullmatch(profile.email):
-        raise ProfileValidationError("EMAIL não usa synthetic.invalid")
+    email_parts = profile.email.split("@")
+    if (
+        len(email_parts) != 2
+        or not email_parts[0]
+        or len(email_parts[0]) > EMAIL_LOCAL_PART_MAX_LENGTH
+        or not _EMAIL_LOCAL_PART_PATTERN.fullmatch(email_parts[0])
+        or email_parts[1] not in EMAIL_DOMAINS
+    ):
+        raise ProfileValidationError("EMAIL não usa formato e domínio autorizados")
     if (
         "Cidade Fictícia - ZZ" not in profile.address
         or "CEP 00000-000" not in profile.address

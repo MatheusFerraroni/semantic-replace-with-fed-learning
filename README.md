@@ -110,12 +110,18 @@ Cada comparação benigna/adversária reconstrói independentemente a mesma agen
 auxiliar por rodada, com os mesmos perfis, valores e ordem. Assim, a diferença
 mede a apresentação adversária e a função de perda, não mudanças nos dados.
 
-O gerador mantém os perfis tipados e as chaves apenas em memória. As conversas
-validadas podem ser gravadas como JSONL em `outputs/datasets/<dataset_id>/`, uma
+O gerador mantém os perfis tipados e o estado determinístico apenas em memória.
+As conversas validadas podem ser gravadas como JSONL em
+`outputs/datasets/<dataset_id>/`, uma
 árvore ignorada pelo Git e separada por cliente. Vítimas são materializadas uma
 vez; o auxiliar grava somente sua apresentação e rodada no início do trabalho
 local. Para retomada, também são preservados a rodada concluída, versões e hashes
 da agenda; uma rodada incompleta é regenerada integralmente.
+
+Os e-mails são derivados deterministicamente dos nomes sintéticos, com variações
+que podem incluir o ano de nascimento, e usam um catálogo fixo de domínios comuns.
+Como esses domínios são reais, a geração não garante que um endereço resultante
+seja inexistente ou não roteável; nenhum e-mail deve ser contatado.
 
 A massa do slot auxiliar é uma dimensão da campanha principal. Todos os cenários
 F0-F5 são executados com `k=1..10` unidades virtuais de peso, sempre com um único
@@ -154,6 +160,19 @@ Em F4/F5, as métricas principais usam as substituições corretamente associada
 ao nome. Os valores originais servem somente para verificar a integridade do
 processo e permanecem exclusivos do avaliador.
 
+## Gerar um dataset para inspeção
+
+Depois da instalação editável, uma única seed gera os dez clientes-vítima e as
+20 rodadas auxiliares F0/F1 nas apresentações benigna e adversária:
+
+```bash
+python -m federated_leakage.generate_dataset --seed 11
+```
+
+O destino padrão é `outputs/datasets/inspection-seed-11-v4/`. A CLI aceita
+opcionalmente `--dataset-id`, `--schedule-id`, `--output-root` e `--dry-run`,
+recusa sobrescrita e só publica o bundle depois do preflight completo.
+
 ## Executar os testes do gerador
 
 Depois de ativar um ambiente virtual:
@@ -163,7 +182,7 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-Os testes cobrem a regressão v2 de nascimento e a estabilidade dos demais campos,
+Os testes cobrem a regressão v4 dos e-mails, a estabilidade v3 dos demais campos,
 os datasets 10×100 das
 vítimas, o pareamento benigno/adversário, escopos de perda, ordem canônica,
 anotações, colisões, round-trip JSONL e manifestos sem textos, valores ou

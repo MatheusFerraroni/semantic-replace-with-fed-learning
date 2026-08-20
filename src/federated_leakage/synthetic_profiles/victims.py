@@ -10,7 +10,7 @@ from .conversations import (
 )
 from .generator import _SyntheticProfileFactory, _assert_faker_version
 from .model import SyntheticProfile, VictimClientDataset
-from .seeding import permuted_index, permuted_tuple
+from .seeding import derive_seed_material, permuted_index, permuted_tuple
 from .validation import (
     ConversationValidationError,
     ProfileValidationError,
@@ -30,12 +30,17 @@ CONVERSATIONS_PER_VICTIM_CLIENT = (
 class VictimDatasetGenerator:
     """Materializa uma vez os dez conjuntos locais a partir do fluxo vítima."""
 
-    def __init__(self, stream_key: bytes, *, locale: str = "pt_BR") -> None:
-        if len(stream_key) != 32:
-            raise ValueError("a chave do fluxo deve possuir 32 bytes")
+    def __init__(self, seed: int, *, locale: str = "pt_BR") -> None:
+        self._seed_material = derive_seed_material(
+            seed,
+            namespace="victim",
+            schedule_id="victims",
+        )
         _assert_faker_version()
-        self._stream_key = stream_key
-        self._profiles = _SyntheticProfileFactory(stream_key, locale=locale)
+        self._profiles = _SyntheticProfileFactory(
+            self._seed_material,
+            locale=locale,
+        )
 
     def _generate_profiles(self) -> Tuple[Tuple[SyntheticProfile, ...], ...]:
         clients = []
@@ -101,7 +106,7 @@ class VictimDatasetGenerator:
                     )
 
                 general_position = permuted_index(
-                    self._stream_key,
+                    self._seed_material,
                     f"VICTIM_GENERAL_TEMPLATE/v1/{client_index}",
                     profile_index,
                     len(GENERAL_CONVERSATION_TEMPLATE_IDS),
@@ -119,7 +124,7 @@ class VictimDatasetGenerator:
             dataset = VictimClientDataset(
                 client_id=client_id,
                 conversations=permuted_tuple(
-                    self._stream_key,
+                    self._seed_material,
                     f"VICTIM_CONVERSATION_ORDER/v1/{client_index}",
                     logical_conversations,
                 ),

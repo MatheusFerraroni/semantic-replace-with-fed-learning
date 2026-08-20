@@ -1,14 +1,13 @@
-"""Derivação determinística e separada das chaves de geração."""
+"""Derivação determinística de sequências a partir de uma única seed."""
 
 import hashlib
-import hmac
 import math
 from typing import Sequence, Tuple, TypeVar, Union
 
 
 SeedPart = Union[str, int, bytes]
 Item = TypeVar("Item")
-MINIMUM_MASTER_KEY_BYTES = 32
+SEED_DERIVATION_VERSION = "experiment-seed-derivation/v1"
 
 
 def _part_as_bytes(part: SeedPart) -> bytes:
@@ -28,46 +27,55 @@ def _encode_parts(*parts: SeedPart) -> bytes:
     return bytes(encoded)
 
 
-def derive_key(key: bytes, *parts: SeedPart) -> bytes:
-    """Deriva uma chave de 256 bits com contexto codificado sem ambiguidades."""
+def derive_bytes(seed_material: bytes, *parts: SeedPart) -> bytes:
+    """Deriva 256 bits determinísticos com contexto codificado sem ambiguidades."""
 
-    if not key:
-        raise ValueError("a chave de derivação não pode ser vazia")
-    return hmac.digest(key, _encode_parts(*parts), hashlib.sha256)
+    if len(seed_material) != 32:
+        raise ValueError("o material determinístico deve possuir 32 bytes")
+    return hashlib.sha256(
+        _encode_parts(
+            "federated-leakage/derive-bytes/v1",
+            seed_material,
+            *parts,
+        )
+    ).digest()
 
 
-def derive_stream_key(
-    master_key: bytes,
+def derive_seed_material(
+    seed: int,
     *,
-    experiment_seed: int,
     namespace: str,
     schedule_id: str,
 ) -> bytes:
-    """Cria uma chave de fluxo sem expor a chave mestra a um participante."""
+    """Separa deterministicamente um contexto lógico da seed experimental."""
 
-    if len(master_key) < MINIMUM_MASTER_KEY_BYTES:
-        raise ValueError("a chave mestra deve possuir pelo menos 32 bytes")
-    if experiment_seed < 0:
-        raise ValueError("a semente experimental não pode ser negativa")
+    if type(seed) is not int or seed < 0:
+        raise ValueError("a seed experimental deve ser um inteiro não negativo")
     if not namespace or not schedule_id:
         raise ValueError("namespace e schedule_id são obrigatórios")
 
-    return derive_key(
-        master_key,
-        "federated-leakage/stream-key/v1",
-        experiment_seed,
-        namespace,
-        schedule_id,
-    )
+    return hashlib.sha256(
+        _encode_parts(
+            SEED_DERIVATION_VERSION,
+            seed,
+            namespace,
+            schedule_id,
+        )
+    ).digest()
 
 
-def derive_integer(key: bytes, *parts: SeedPart) -> int:
-    """Converte uma derivação HMAC em inteiro determinístico."""
+def derive_integer(seed_material: bytes, *parts: SeedPart) -> int:
+    """Converte uma derivação SHA-256 em inteiro determinístico."""
 
-    return int.from_bytes(derive_key(key, *parts), "big")
+    return int.from_bytes(derive_bytes(seed_material, *parts), "big")
 
 
-def permuted_index(key: bytes, label: str, index: int, modulus: int) -> int:
+def permuted_index(
+    seed_material: bytes,
+    label: str,
+    index: int,
+    modulus: int,
+) -> int:
     """Aplica uma permutação afim determinística em um domínio finito."""
 
     if modulus <= 1:
@@ -75,7 +83,7 @@ def permuted_index(key: bytes, label: str, index: int, modulus: int) -> int:
     if index < 0 or index >= modulus:
         raise ValueError("o índice deve pertencer ao domínio da permutação")
 
-    multiplier = derive_integer(key, label, "multiplier") % modulus
+    multiplier = derive_integer(seed_material, label, "multiplier") % modulus
     if multiplier == 0:
         multiplier = 1
     while math.gcd(multiplier, modulus) != 1:
@@ -83,17 +91,26 @@ def permuted_index(key: bytes, label: str, index: int, modulus: int) -> int:
         if multiplier == 0:
             multiplier = 1
 
-    offset = derive_integer(key, label, "offset") % modulus
+    offset = derive_integer(seed_material, label, "offset") % modulus
     return (multiplier * index + offset) % modulus
 
 
-def permuted_tuple(key: bytes, label: str, items: Sequence[Item]) -> Tuple[Item, ...]:
+def permuted_tuple(
+    seed_material: bytes,
+    label: str,
+    items: Sequence[Item],
+) -> Tuple[Item, ...]:
     """Ordena uma sequência por uma permutação determinística de suas posições."""
 
     if len(items) <= 1:
         return tuple(items)
     source_indices = sorted(
         range(len(items)),
-        key=lambda index: permuted_index(key, label, index, len(items)),
+        key=lambda index: permuted_index(
+            seed_material,
+            label,
+            index,
+            len(items),
+        ),
     )
     return tuple(items[index] for index in source_indices)

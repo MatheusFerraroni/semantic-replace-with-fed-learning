@@ -11,7 +11,6 @@ from federated_leakage.synthetic_profiles import (
     AuxiliaryRoundGenerator,
     DatasetStorageError,
     VictimDatasetGenerator,
-    derive_stream_key,
     read_auxiliary_round,
     read_victim_client_dataset,
     write_auxiliary_round,
@@ -19,29 +18,15 @@ from federated_leakage.synthetic_profiles import (
 )
 
 
-MASTER_KEY = bytes(range(32))
-DATASET_ID = "inspection-seed-11-v2"
+DATASET_ID = "inspection-seed-11-v4"
 SCHEDULE_ID = "F0-F1"
-
-
-def stream_key(namespace: str, schedule_id: str) -> bytes:
-    return derive_stream_key(
-        MASTER_KEY,
-        experiment_seed=11,
-        namespace=namespace,
-        schedule_id=schedule_id,
-    )
 
 
 class ConversationStorageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.victims = VictimDatasetGenerator(
-            stream_key("victim", "victims")
-        ).generate()
-        auxiliary = AuxiliaryRoundGenerator(
-            stream_key("auxiliary", SCHEDULE_ID)
-        )
+        cls.victims = VictimDatasetGenerator(11).generate()
+        auxiliary = AuxiliaryRoundGenerator(11, schedule_id=SCHEDULE_ID)
         cls.benign = auxiliary.generate(1, presentation="benign")
         cls.adversarial = auxiliary.generate(1, presentation="adversarial")
 
@@ -135,8 +120,8 @@ class ConversationStorageTests(unittest.TestCase):
                 for conversation in dataset.conversations:
                     self.assertNotIn(conversation.text, victim_manifest)
                     self.assertNotIn(conversation.entity_id, victim_manifest)
-            self.assertNotIn(MASTER_KEY.hex(), metadata)
-            self.assertNotIn(MASTER_KEY.hex(), victim_manifest)
+            self.assertNotIn("experiment_seed", metadata)
+            self.assertNotIn("experiment_seed", victim_manifest)
 
     def test_rejects_unsafe_paths_overwrite_and_partial_victim_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

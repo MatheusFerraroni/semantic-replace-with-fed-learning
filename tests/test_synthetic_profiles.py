@@ -1,6 +1,8 @@
 import hashlib
 import json
+import re
 import tempfile
+import unicodedata
 import unittest
 from dataclasses import replace
 from datetime import timedelta
@@ -15,6 +17,8 @@ from federated_leakage.synthetic_profiles import (
     CANONICAL_PREFIX_TEMPLATE,
     CANONICAL_PROFILE_TEMPLATE,
     DUPLICATE_ALLOWED_FIELD_TYPES,
+    EMAIL_DOMAINS,
+    EMAIL_LOCAL_PART_MAX_LENGTH,
     MAXIMUM_AGE_YEARS,
     MINIMUM_AGE_YEARS,
     PROFILE_FIELD_ORDER,
@@ -22,10 +26,10 @@ from federated_leakage.synthetic_profiles import (
     UNIQUE_FIELD_TYPES,
     AuxiliaryRoundGenerator,
     ProfileValidationError,
+    VictimDatasetGenerator,
     append_round_manifest,
     build_round_manifest,
     cpf_has_valid_checksum,
-    derive_stream_key,
     profile_field_values,
     render_profile,
     rg_has_valid_reference_checksum,
@@ -33,20 +37,11 @@ from federated_leakage.synthetic_profiles import (
 )
 
 
-MASTER_KEY = bytes(range(32))
-V1_SCHEDULE_SHA256 = "e403ae7789716bf801487281a9497be258bed2467ec617b7e6de51c02eeadd13"
-V1_NON_BIRTH_VALUES_SHA256 = "302116e4bc9061d0db820525df0e16cfcd8e0a858b59f89a8dcb3a0e664d0702"
-V2_BATCH_SHA256 = "424be41b5146e16983bb4d08e3d5f593951593202d3c08c592670303354aa022"
+V3_SCHEDULE_SHA256 = "c9ebf8ff174b787ce32b8f51a21bc22043a5539c73c5669d65c6f691d441a8d4"
+V3_NON_EMAIL_VALUES_SHA256 = "9321aa55c293bfeb0ea37d6c4b03a0bad66b636bfe98515ecb92721eae08b0d1"
+V4_EMAIL_VALUES_SHA256 = "9e4984b8bc5e2724a50b6afcd1369de03d9adcc1ac4075e62e542109874b7d9c"
+V4_BATCH_SHA256 = "938135dccb64bb3762d53ea864960cf2a90e0fb6e3708ab67a7640817b6c7991"
 V1_TEMPLATE_SHA256 = "14773a9f23de878a7680ff0e6ceb33fdc16dd877e1abe5950f024905fa5546ec"
-
-
-def auxiliary_key(schedule_id: str = "F0-F1") -> bytes:
-    return derive_stream_key(
-        MASTER_KEY,
-        experiment_seed=11,
-        namespace="auxiliary",
-        schedule_id=schedule_id,
-    )
 
 
 def sha256_lines(values: list[str]) -> str:
@@ -60,9 +55,9 @@ def sha256_lines(values: list[str]) -> str:
 
 class SyntheticProfileGeneratorTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.generator = AuxiliaryRoundGenerator(auxiliary_key())
+        self.generator = AuxiliaryRoundGenerator(11)
 
-    def test_v2_birth_date_and_v1_non_birth_regression(self) -> None:
+    def test_v4_email_and_v3_non_email_regression(self) -> None:
         profiles = [
             self.generator.generate_profile(1, sample_index)
             for sample_index in range(PROFILES_PER_ROUND)
@@ -81,26 +76,32 @@ class SyntheticProfileGeneratorTests(unittest.TestCase):
         ]
         self.assertEqual(
             sha256_lines([profile.entity_id for profile in profiles]),
-            V1_SCHEDULE_SHA256,
+            V3_SCHEDULE_SHA256,
         )
         self.assertEqual(
             sha256_lines(
                 [render_profile(profile).text for profile in profiles]
                 + general_records
             ),
-            V2_BATCH_SHA256,
+            V4_BATCH_SHA256,
         )
-        non_birth_values = []
+        non_email_values = []
+        email_values = []
         for profile in profiles:
             values = profile_field_values(profile)
-            non_birth_values.extend(
+            non_email_values.extend(
                 f"{field_type}\t{values[field_type]}"
                 for field_type in PROFILE_FIELD_ORDER
-                if field_type != "BIRTH_DATE"
+                if field_type != "EMAIL"
             )
+            email_values.append(values["EMAIL"])
         self.assertEqual(
-            sha256_lines(non_birth_values),
-            V1_NON_BIRTH_VALUES_SHA256,
+            sha256_lines(non_email_values),
+            V3_NON_EMAIL_VALUES_SHA256,
+        )
+        self.assertEqual(
+            sha256_lines(email_values),
+            V4_EMAIL_VALUES_SHA256,
         )
         self.assertEqual(
             hashlib.sha256(CANONICAL_PROFILE_TEMPLATE.encode("utf-8")).hexdigest(),
@@ -109,7 +110,7 @@ class SyntheticProfileGeneratorTests(unittest.TestCase):
 
     def test_round_is_exactly_reproducible(self) -> None:
         first = self.generator.generate(round_id=1, presentation="benign")
-        second = AuxiliaryRoundGenerator(auxiliary_key()).generate(
+        second = AuxiliaryRoundGenerator(11).generate(
             round_id=1, presentation="benign"
         )
 
@@ -211,6 +212,93 @@ class SyntheticProfileGeneratorTests(unittest.TestCase):
         self.assertIn("CPF", str(context.exception))
         self.assertNotIn(first.cpf, str(context.exception))
 
+        repeated_email = replace(second, email=first.email)
+        with self.assertRaises(ProfileValidationError) as email_context:
+            validate_profile_collection([first, repeated_email])
+        self.assertIn("EMAIL", str(email_context.exception))
+        self.assertNotIn(first.email, str(email_context.exception))
+
+    @staticmethod
+    def _email_name_parts(person_name: str) -> tuple[str, ...]:
+        return tuple(
+            re.sub(
+                r"[^a-z0-9]+",
+                "",
+                unicodedata.normalize("NFKD", part)
+                .encode("ascii", "ignore")
+                .decode("ascii")
+                .lower(),
+            )
+            for part in person_name.split()
+        )
+
+    def test_email_catalog_name_variations_and_validation(self) -> None:
+        profiles = [
+            self.generator.generate_profile(1, sample_index)
+            for sample_index in range(PROFILES_PER_ROUND)
+        ]
+        self.assertTrue(any(not profile.person_name.isascii() for profile in profiles))
+        pattern_indices = set()
+        domains = set()
+        for profile in profiles:
+            local_part, domain = profile.email.rsplit("@", 1)
+            parts = self._email_name_parts(profile.person_name)
+            first_name = parts[0]
+            surname = parts[-2]
+            marker = parts[-1]
+            year = profile.birth_date.year
+            expected_patterns = (
+                f"{first_name}.{surname}.{marker}",
+                f"{first_name}.{surname}{year}.{marker}",
+                f"{first_name[0]}.{surname}.{marker}",
+                f"{first_name}.{surname[0]}.{marker}.{year % 100:02d}",
+                f"{first_name}.{marker}{year}",
+                f"{first_name[0]}{surname}.{marker}{year % 100:02d}",
+            )
+            self.assertIn(local_part, expected_patterns)
+            pattern_indices.add(expected_patterns.index(local_part))
+            domains.add(domain)
+            self.assertLessEqual(len(local_part), EMAIL_LOCAL_PART_MAX_LENGTH)
+            self.assertTrue(local_part.isascii())
+            self.assertFalse(local_part.startswith("perfil."))
+
+        self.assertEqual(pattern_indices, set(range(6)))
+        self.assertEqual(domains, set(EMAIL_DOMAINS))
+
+        reference = profiles[0]
+        for invalid_email in (
+            "nome..sobrenome@gmail.com",
+            "nome.sobrenome@example.com",
+            f"{'a' * 65}@gmail.com",
+            "joão.silva@gmail.com",
+        ):
+            with self.assertRaises(ProfileValidationError) as context:
+                validate_profile_collection(
+                    [replace(reference, email=invalid_email)]
+                )
+            self.assertNotIn(invalid_email, str(context.exception))
+
+    def test_email_uniqueness_across_main_and_development_seeds(self) -> None:
+        for seed in (11, 22, 33, 44, 55, 101):
+            victim_emails = {
+                annotation.value
+                for dataset in VictimDatasetGenerator(seed).generate()
+                for conversation in dataset.conversations
+                if conversation.kind == "protected"
+                for annotation in conversation.annotations
+                if annotation.field_type == "EMAIL"
+            }
+            auxiliary = AuxiliaryRoundGenerator(seed)
+            auxiliary_emails = [
+                auxiliary.generate_profile(round_id, sample_index).email
+                for round_id in range(1, AUXILIARY_ROUNDS + 1)
+                for sample_index in range(PROFILES_PER_ROUND)
+            ]
+            all_emails = [*victim_emails, *auxiliary_emails]
+            self.assertEqual(len(victim_emails), 200)
+            self.assertEqual(len(auxiliary_emails), 1_600)
+            self.assertEqual(len(all_emails), len(set(all_emails)), seed)
+
     def test_formats_annotations_and_human_time_slots(self) -> None:
         for sample_index in range(10):
             profile = self.generator.generate_profile(1, sample_index)
@@ -218,7 +306,7 @@ class SyntheticProfileGeneratorTests(unittest.TestCase):
             self.assertFalse(cpf_has_valid_checksum(profile.cpf))
             self.assertFalse(rg_has_valid_reference_checksum(profile.rg))
             self.assertTrue(profile.phone.startswith("+55 00 9"))
-            self.assertTrue(profile.email.endswith("@synthetic.invalid"))
+            self.assertIn(profile.email.rsplit("@", 1)[1], EMAIL_DOMAINS)
             self.assertIn("Cidade Fictícia - ZZ", profile.address)
             self.assertIn(profile.appointment_time.minute, {0, 15, 30, 45})
             self.assertEqual(profile.appointment_time.second, 0)
@@ -240,28 +328,27 @@ class SyntheticProfileGeneratorTests(unittest.TestCase):
                     rendered.text[annotation.start : annotation.end], annotation.value
                 )
 
-    def test_stream_key_isolation(self) -> None:
-        victim_key = derive_stream_key(
-            MASTER_KEY,
-            experiment_seed=11,
-            namespace="victim",
-            schedule_id="victims",
-        )
-        other_pair_key = auxiliary_key("F2-F3-epsilon-3")
-
-        self.assertNotEqual(auxiliary_key(), victim_key)
-        self.assertNotEqual(auxiliary_key(), other_pair_key)
+    def test_seed_domains_are_deterministically_separated(self) -> None:
+        victim_entity_ids = {
+            conversation.entity_id
+            for dataset in VictimDatasetGenerator(11).generate()
+            for conversation in dataset.conversations
+        }
+        auxiliary_profile = self.generator.generate_profile(1, 0)
+        self.assertNotIn(auxiliary_profile.entity_id, victim_entity_ids)
         self.assertNotEqual(
-            self.generator.generate_profile(1, 0),
-            AuxiliaryRoundGenerator(victim_key).generate_profile(1, 0),
+            auxiliary_profile,
+            AuxiliaryRoundGenerator(22).generate_profile(1, 0),
+        )
+        self.assertNotEqual(
+            auxiliary_profile,
+            AuxiliaryRoundGenerator(
+                11,
+                schedule_id="F2-F3-epsilon-3",
+            ).generate_profile(1, 0),
         )
         with self.assertRaises(ValueError):
-            derive_stream_key(
-                b"short",
-                experiment_seed=11,
-                namespace="auxiliary",
-                schedule_id="F0-F1",
-            )
+            AuxiliaryRoundGenerator(-1)
 
     def test_auxiliary_manifest_v2_contains_only_metadata(self) -> None:
         benign = self.generator.generate(round_id=1, presentation="benign")

@@ -33,6 +33,7 @@ from .victims import (
 
 MANIFEST_SCHEMA_VERSION = "auxiliary-round-manifest/v2"
 VICTIM_MANIFEST_SCHEMA_VERSION = "victim-dataset-manifest/v1"
+GENERATION_MANIFEST_SCHEMA_VERSION = "dataset-generation-manifest/v1"
 
 AUXILIARY_MANIFEST_KEYS = frozenset(
     {
@@ -75,6 +76,26 @@ VICTIM_MANIFEST_KEYS = frozenset(
         "catalog_sha256",
     }
 )
+GENERATION_MANIFEST_KEYS = frozenset(
+    {
+        "schema_version",
+        "experiment_seed",
+        "dataset_id",
+        "schedule_id",
+        "profile_generator_version",
+        "conversation_generator_version",
+        "round_count",
+        "presentations",
+        "victim_conversation_records",
+        "auxiliary_conversation_records",
+        "total_conversation_records",
+        "victim_dataset_sha256",
+        "auxiliary_schedule_sha256",
+        "auxiliary_values_sha256",
+        "auxiliary_presentation_sha256",
+        "auxiliary_batch_sha256",
+    }
+)
 AUXILIARY_HASH_KEYS = (
     "schedule_sha256",
     "values_sha256",
@@ -87,6 +108,13 @@ VICTIM_HASH_KEYS = (
     "dataset_sha256",
     "canonical_template_sha256",
     "catalog_sha256",
+)
+GENERATION_HASH_KEYS = (
+    "victim_dataset_sha256",
+    "auxiliary_schedule_sha256",
+    "auxiliary_values_sha256",
+    "auxiliary_presentation_sha256",
+    "auxiliary_batch_sha256",
 )
 
 
@@ -232,6 +260,90 @@ def build_victim_dataset_manifest(
     return manifest
 
 
+def build_generation_manifest(
+    *,
+    experiment_seed: int,
+    dataset_id: str,
+    schedule_id: str,
+    victim_manifest: Dict[str, Any],
+    round_manifests: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Resume um bundle completo sem incluir seu conteúdo protegido."""
+
+    if type(experiment_seed) is not int or experiment_seed < 0:
+        raise ValueError("a seed experimental deve ser um inteiro não negativo")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise ValueError("dataset_id do manifesto de geração inválido")
+    if not isinstance(schedule_id, str) or not schedule_id:
+        raise ValueError("schedule_id do manifesto de geração inválido")
+
+    _validate_victim_manifest(victim_manifest)
+    resolved_round_manifests = tuple(round_manifests)
+    expected_order = tuple(
+        (round_id, presentation)
+        for round_id in range(1, AUXILIARY_ROUNDS + 1)
+        for presentation in ("benign", "adversarial")
+    )
+    if len(resolved_round_manifests) != len(expected_order):
+        raise ValueError("quantidade de manifestos auxiliares inválida")
+    for round_manifest in resolved_round_manifests:
+        _validate_round_manifest(round_manifest)
+    if tuple(
+        (manifest["round"], manifest["presentation"])
+        for manifest in resolved_round_manifests
+    ) != expected_order:
+        raise ValueError("ordem dos manifestos auxiliares inválida")
+    for index in range(0, len(resolved_round_manifests), 2):
+        benign = resolved_round_manifests[index]
+        adversarial = resolved_round_manifests[index + 1]
+        if (
+            benign["schedule_sha256"] != adversarial["schedule_sha256"]
+            or benign["values_sha256"] != adversarial["values_sha256"]
+        ):
+            raise ValueError("manifestos auxiliares pareados divergem")
+
+    victim_records = (
+        victim_manifest["client_count"]
+        * victim_manifest["conversations_per_client"]
+    )
+    auxiliary_records = sum(
+        manifest["conversation_records"]
+        for manifest in resolved_round_manifests
+    )
+    manifest = {
+        "schema_version": GENERATION_MANIFEST_SCHEMA_VERSION,
+        "experiment_seed": experiment_seed,
+        "dataset_id": dataset_id,
+        "schedule_id": schedule_id,
+        "profile_generator_version": GENERATOR_VERSION,
+        "conversation_generator_version": CONVERSATION_GENERATOR_VERSION,
+        "round_count": AUXILIARY_ROUNDS,
+        "presentations": ["benign", "adversarial"],
+        "victim_conversation_records": victim_records,
+        "auxiliary_conversation_records": auxiliary_records,
+        "total_conversation_records": victim_records + auxiliary_records,
+        "victim_dataset_sha256": victim_manifest["dataset_sha256"],
+        "auxiliary_schedule_sha256": _sha256_lines(
+            manifest["schedule_sha256"]
+            for manifest in resolved_round_manifests
+        ),
+        "auxiliary_values_sha256": _sha256_lines(
+            manifest["values_sha256"]
+            for manifest in resolved_round_manifests
+        ),
+        "auxiliary_presentation_sha256": _sha256_lines(
+            manifest["presentation_sha256"]
+            for manifest in resolved_round_manifests
+        ),
+        "auxiliary_batch_sha256": _sha256_lines(
+            manifest["batch_sha256"]
+            for manifest in resolved_round_manifests
+        ),
+    }
+    _validate_generation_manifest(manifest)
+    return manifest
+
+
 def _validate_round_manifest(manifest: Dict[str, Any]) -> None:
     if set(manifest) != AUXILIARY_MANIFEST_KEYS:
         raise ValueError("o manifesto auxiliar contém campos não autorizados")
@@ -294,6 +406,40 @@ def _validate_victim_manifest(manifest: Dict[str, Any]) -> None:
         raise ValueError("hash do manifesto vítima inválido")
 
 
+def _validate_generation_manifest(manifest: Dict[str, Any]) -> None:
+    if set(manifest) != GENERATION_MANIFEST_KEYS:
+        raise ValueError("o manifesto de geração contém campos não autorizados")
+    if manifest["schema_version"] != GENERATION_MANIFEST_SCHEMA_VERSION:
+        raise ValueError("schema_version do manifesto de geração inválida")
+    if (
+        type(manifest["experiment_seed"]) is not int
+        or manifest["experiment_seed"] < 0
+    ):
+        raise ValueError("seed do manifesto de geração inválida")
+    if not isinstance(manifest["dataset_id"], str) or not manifest["dataset_id"]:
+        raise ValueError("dataset_id do manifesto de geração inválido")
+    if not isinstance(manifest["schedule_id"], str) or not manifest["schedule_id"]:
+        raise ValueError("schedule_id do manifesto de geração inválido")
+    if manifest["profile_generator_version"] != GENERATOR_VERSION:
+        raise ValueError(
+            "profile_generator_version do manifesto de geração inválida"
+        )
+    if manifest["conversation_generator_version"] != CONVERSATION_GENERATOR_VERSION:
+        raise ValueError(
+            "conversation_generator_version do manifesto de geração inválida"
+        )
+    if (
+        manifest["round_count"] != AUXILIARY_ROUNDS
+        or manifest["presentations"] != ["benign", "adversarial"]
+        or manifest["victim_conversation_records"] != 1_000
+        or manifest["auxiliary_conversation_records"] != 4_000
+        or manifest["total_conversation_records"] != 5_000
+    ):
+        raise ValueError("contagens do manifesto de geração inválidas")
+    if any(not _is_sha256(manifest[key]) for key in GENERATION_HASH_KEYS):
+        raise ValueError("hash do manifesto de geração inválido")
+
+
 def append_round_manifest(path: Path, manifest: Dict[str, Any]) -> None:
     """Acrescenta uma linha auxiliar validada ao JSONL externo da execução."""
 
@@ -311,4 +457,20 @@ def write_victim_dataset_manifest(path: Path, manifest: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8") as output:
         json.dump(manifest, output, sort_keys=True, ensure_ascii=False)
+        output.write("\n")
+
+
+def write_generation_manifest(path: Path, manifest: Dict[str, Any]) -> None:
+    """Cria sem sobrescrever o manifesto seguro do bundle completo."""
+
+    _validate_generation_manifest(manifest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8") as output:
+        json.dump(
+            manifest,
+            output,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         output.write("\n")

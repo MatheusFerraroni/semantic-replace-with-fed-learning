@@ -97,7 +97,7 @@ O formato de referência é um contrato canônico completo:
 ```text
 USUÁRIO: Meu nome é Ana Exemplo Ribeiro. Meus dados cadastrados são: data de
 nascimento 14/08/1987; CPF 483.291.760-41; RG 72.819.431-2; telefone
-+55 00 94021-7281; e-mail ana.ribeiro@synthetic.invalid; endereço Rua Exemplo,
++55 00 94021-7281; e-mail <EMAIL-SINTÉTICO-EM-DOMÍNIO-COMUM>; endereço Rua Exemplo,
 123, Bairro Sintético; data de atendimento 22/09/2026; horário de atendimento
 14:30.
 ```
@@ -144,7 +144,7 @@ Perfeito. Podemos seguir com a solicitação.
 
 Cada participante usa as quatro respostas uma vez. O catálogo geral contém 20
 pares fixos de pergunta e resposta sem valores ou fatos individualizados. Cada
-cliente usa as 20 entradas uma vez, em ordem determinística derivada de sua chave.
+cliente usa as 20 entradas uma vez, em ordem determinística derivada da seed.
 Os datasets das vítimas são gerados uma vez por semente e não dependem de rodada,
 cenário nem `k`.
 
@@ -152,7 +152,12 @@ Regras de segurança dos valores:
 
 - CPFs preservam a aparência, mas possuem checksum deliberadamente inválido;
 - RGs preservam somente a aparência sintética;
-- e-mails usam exclusivamente o domínio reservado `synthetic.invalid`;
+- e-mails combinam variações ASCII do primeiro nome, sobrenome, pseudossobrenome
+  sintético e, em alguns formatos, ano de nascimento; os domínios permitidos são
+  `gmail.com`, `outlook.com`, `hotmail.com`, `yahoo.com`, `icloud.com` e
+  `proton.me`;
+- como esses domínios são reais, não há garantia de que o endereço gerado seja
+  inexistente ou não roteável; a campanha nunca consulta nem contata os endereços;
 - telefones e endereços usam padrões deliberadamente não roteáveis ou marcados
   como sintéticos;
 - nomes são únicos dentro da semente e não revelam cliente, papel ou perfil;
@@ -214,8 +219,8 @@ No início de cada rodada, o cliente auxiliar gera localmente 80 perfis completo
 e 20 conversas gerais sem dados de perfil. Perfis, nomes, documentos, telefones,
 e-mails e endereços auxiliares não são reutilizados em outra amostra ou rodada.
 Datas de nascimento e datas e horários de atendimento são as exceções e podem se
-repetir. A derivação determinística usa HMAC-SHA-256 e separa pelo
-menos a semente da execução, o par de cenários, o fluxo auxiliar, a rodada, o
+repetir. A derivação determinística usa SHA-256 e separa pelo
+menos a única seed da execução, o par de cenários, o fluxo auxiliar, a rodada, o
 índice da amostra e o campo. Cenário benigno/adversário e `k` não entram nessa
 derivação.
 
@@ -225,13 +230,14 @@ início de cada rodada. Eles não dependem de respostas, gradientes ou saídas d
 modelo global na referência. Usar o modelo global para escolher templates,
 gatilhos ou valores pertence à ablação adaptativa.
 
-A chave mestra da geração fica somente com o executor confiável. Cada papel
-recebe apenas uma chave de fluxo derivada; em particular, o cliente auxiliar
-jamais recebe material que permita derivar os fluxos das vítimas, dos controles
-ou das substituições. O perfil tipado e as chaves não são escritos em disco. A
-rodada é materializada localmente e suas conversas validadas podem ser publicadas
-no JSONL atribuído ao auxiliar antes de serem carregadas, tokenizadas uma vez e
-usadas no treinamento.
+A seed é um inteiro não negativo, compartilhado pela execução e não secreto.
+Ela não constitui um controle de acesso nem uma barreira criptográfica. O
+isolamento entre papéis é operacional: a orquestração entrega a cada componente
+somente sua API e seu caminho, sem objetos, arquivos ou registros pertencentes
+a outro papel. O perfil tipado e o estado interno de derivação não são escritos
+em disco. A rodada é materializada localmente e suas conversas validadas podem
+ser publicadas no JSONL atribuído ao auxiliar antes de serem carregadas,
+tokenizadas uma vez e usadas no treinamento.
 
 Para preservar o pareamento sem compartilhar arquivos, F0/F1, F2/F3 e F4/F5
 reconstroem independentemente a mesma agenda auxiliar da rodada a partir da
@@ -622,8 +628,8 @@ identificadores internos e hashes. Nenhum deles pode conter nomes, textos
 renderizados nem outros valores protegidos. As conversas JSONL são a única
 exceção de persistência bruta: ficam em `outputs/datasets/<dataset_id>/`, são
 escritas de forma atômica, não entram no Git e cada consumidor recebe somente o
-caminho de seu cliente, agenda, apresentação e rodada. Perfis tipados e chaves
-continuam apenas em memória.
+caminho de seu cliente, agenda, apresentação e rodada. Perfis tipados e estado
+interno de derivação continuam apenas em memória.
 
 Pontos de restauração permanentes ficam nas rodadas 1, 10 e 20. O ponto de
 restauração para retomada é gravado atomicamente após agregação e auditoria. Ele

@@ -6,7 +6,7 @@ from typing import Dict, Literal, Optional, Tuple
 
 
 PROFILE_SCHEMA_VERSION = "synthetic-profile/v1"
-GENERATOR_VERSION = "synthetic-profile-generator/v2"
+GENERATOR_VERSION = "synthetic-profile-generator/v4"
 CONVERSATION_SCHEMA_VERSION = "training-conversation/v1"
 CONVERSATION_GENERATOR_VERSION = "training-conversation-generator/v1"
 VICTIM_DATASET_SCHEMA_VERSION = "victim-client-dataset/v1"
@@ -17,6 +17,18 @@ BIRTH_DATE_END = date(2006, 12, 31)
 BIRTH_DATE_AGE_REFERENCE = date(2026, 12, 31)
 MINIMUM_AGE_YEARS = 20
 MAXIMUM_AGE_YEARS = 60
+
+EMAIL_DOMAIN_CATALOG_VERSION = "synthetic-email-domain-catalog/v1"
+EMAIL_PATTERN_VERSION = "synthetic-email-pattern/v2"
+EMAIL_LOCAL_PART_MAX_LENGTH = 64
+EMAIL_DOMAINS = (
+    "gmail.com",
+    "outlook.com",
+    "hotmail.com",
+    "yahoo.com",
+    "icloud.com",
+    "proton.me",
+)
 
 ConversationKind = Literal["protected", "general"]
 LossScope = Literal["all_tokens", "canonical_completion"]

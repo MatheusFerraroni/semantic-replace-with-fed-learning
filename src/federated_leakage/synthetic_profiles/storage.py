@@ -82,6 +82,12 @@ def _validate_component(value: str, label: str) -> str:
     return value
 
 
+def validate_storage_component(value: str, label: str) -> str:
+    """Valida um componente de caminho sem criar diretórios ou arquivos."""
+
+    return _validate_component(value, label)
+
+
 def _canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
     return (
         json.dumps(

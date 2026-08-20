@@ -1,6 +1,7 @@
 """Geração determinística e efêmera dos dados auxiliares de cada rodada."""
 
 import importlib.metadata
+import re
 import unicodedata
 from datetime import date, time, timedelta
 from typing import Tuple
@@ -17,11 +18,18 @@ from .documents import format_invalid_cpf, format_invalid_rg, format_non_routabl
 from .model import (
     BIRTH_DATE_END,
     BIRTH_DATE_START,
+    EMAIL_DOMAINS,
     AuxiliaryPresentation,
     AuxiliaryRound,
     SyntheticProfile,
 )
-from .seeding import derive_integer, derive_key, permuted_index, permuted_tuple
+from .seeding import (
+    derive_bytes,
+    derive_integer,
+    derive_seed_material,
+    permuted_index,
+    permuted_tuple,
+)
 from .validation import validate_auxiliary_round, validate_profile
 
 
@@ -50,6 +58,7 @@ _SYNTHETIC_SURNAME_SYLLABLES = (
     "do", "du", "fa", "fe", "fi", "fo", "fu", "ga", "ge", "gi", "go", "gu", "la",
 )
 _SYNTHETIC_SURNAME_DOMAIN = len(_SYNTHETIC_SURNAME_SYLLABLES) ** 3
+_EMAIL_TOKEN_PATTERN = re.compile(r"[^a-z0-9]+")
 
 
 def _assert_faker_version() -> None:
@@ -65,15 +74,15 @@ def _assert_faker_version() -> None:
 
 
 class _SyntheticProfileFactory:
-    """Primitiva compartilhada que altera somente BIRTH_DATE no gerador v2."""
+    """Primitiva compartilhada de geração determinística de perfis."""
 
-    def __init__(self, stream_key: bytes, *, locale: str) -> None:
-        self._stream_key = stream_key
+    def __init__(self, seed_material: bytes, *, locale: str) -> None:
+        self._seed_material = seed_material
         self._faker = Faker(locale, use_weighting=False)
 
     def _synthetic_surname(self, position: int) -> str:
         encoded = permuted_index(
-            self._stream_key,
+            self._seed_material,
             "PERSON_NAME/synthetic-surname/v1",
             position,
             _SYNTHETIC_SURNAME_DOMAIN,
@@ -84,8 +93,8 @@ class _SyntheticProfileFactory:
             syllables.append(_SYNTHETIC_SURNAME_SYLLABLES[remainder])
         return "".join(reversed(syllables)).capitalize()
 
-    def _person_name(self, profile_key: bytes, position: int) -> str:
-        faker_seed = derive_integer(profile_key, "PERSON_NAME", "faker")
+    def _person_name(self, profile_material: bytes, position: int) -> str:
+        faker_seed = derive_integer(profile_material, "PERSON_NAME", "faker")
         self._faker.seed_instance(faker_seed)
         name = (
             f"{self._faker.first_name()} {self._faker.last_name()} "
@@ -93,54 +102,106 @@ class _SyntheticProfileFactory:
         )
         return unicodedata.normalize("NFC", name)
 
+    @staticmethod
+    def _email_token(value: str) -> str:
+        ascii_value = (
+            unicodedata.normalize("NFKD", value)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+            .lower()
+        )
+        return _EMAIL_TOKEN_PATTERN.sub("", ascii_value)
+
+    def _email(
+        self,
+        profile_material: bytes,
+        person_name: str,
+        birth_date: date,
+    ) -> str:
+        parts = tuple(
+            part
+            for part in (
+                self._email_token(name_part)
+                for name_part in person_name.split()
+            )
+            if part
+        )
+        if len(parts) < 3:
+            raise RuntimeError("nome sintético insuficiente para gerar EMAIL")
+
+        first_name = parts[0]
+        surname = parts[-2]
+        synthetic_marker = parts[-1]
+        full_year = birth_date.year
+        short_year = full_year % 100
+        local_parts = (
+            f"{first_name}.{surname}.{synthetic_marker}",
+            f"{first_name}.{surname}{full_year}.{synthetic_marker}",
+            f"{first_name[0]}.{surname}.{synthetic_marker}",
+            f"{first_name}.{surname[0]}.{synthetic_marker}.{short_year:02d}",
+            f"{first_name}.{synthetic_marker}{full_year}",
+            f"{first_name[0]}{surname}.{synthetic_marker}{short_year:02d}",
+        )
+        pattern_index = derive_integer(
+            profile_material,
+            "EMAIL/v2/pattern",
+        ) % len(local_parts)
+        domain_index = derive_integer(
+            profile_material,
+            "EMAIL/v2/domain",
+        ) % len(EMAIL_DOMAINS)
+        return f"{local_parts[pattern_index]}@{EMAIL_DOMAINS[domain_index]}"
+
     def generate(self, position: int, *coordinates: int | str) -> SyntheticProfile:
-        profile_key = derive_key(
-            self._stream_key,
+        profile_material = derive_bytes(
+            self._seed_material,
             "synthetic-profile/v1",
             *coordinates,
         )
-        entity_id = derive_key(profile_key, "ENTITY_ID").hex()
+        entity_id = derive_bytes(profile_material, "ENTITY_ID").hex()
 
         birth_offset = (
-            derive_integer(profile_key, "BIRTH_DATE/v2") % _BIRTH_DATE_DOMAIN
+            derive_integer(profile_material, "BIRTH_DATE/v2") % _BIRTH_DATE_DOMAIN
         )
         cpf_base = permuted_index(
-            self._stream_key,
+            self._seed_material,
             "CPF/v1",
             position,
             1_000_000_000,
         )
         rg_base = permuted_index(
-            self._stream_key,
+            self._seed_material,
             "RG/v1",
             position,
             100_000_000,
         )
         phone_base = permuted_index(
-            self._stream_key,
+            self._seed_material,
             "PHONE/v1",
             position,
             100_000_000,
         )
 
         appointment_date_offset = derive_integer(
-            profile_key, "APPOINTMENT_DATE"
+            profile_material, "APPOINTMENT_DATE"
         ) % _APPOINTMENT_DATE_DOMAIN
         appointment_time_index = derive_integer(
-            profile_key, "APPOINTMENT_TIME"
+            profile_material, "APPOINTMENT_TIME"
         ) % len(_APPOINTMENT_TIME_SLOTS)
+        person_name = self._person_name(profile_material, position)
+        birth_date = BIRTH_DATE_START + timedelta(days=birth_offset)
 
         profile = SyntheticProfile(
             entity_id=entity_id,
-            person_name=self._person_name(profile_key, position),
-            birth_date=BIRTH_DATE_START + timedelta(days=birth_offset),
+            person_name=person_name,
+            birth_date=birth_date,
             cpf=format_invalid_cpf(cpf_base),
             rg=format_invalid_rg(rg_base),
             phone=format_non_routable_phone(phone_base),
-            email=f"perfil.{entity_id[:16]}@synthetic.invalid",
+            email=self._email(profile_material, person_name, birth_date),
             address=(
                 f"Alameda Sintética {entity_id[16:24].upper()}, "
-                f"{1 + derive_integer(profile_key, 'ADDRESS', 'number') % 9999}, "
+                f"{1 + derive_integer(profile_material, 'ADDRESS', 'number') % 9999}, "
                 "Bairro Experimental, Cidade Fictícia - ZZ, CEP 00000-000"
             ),
             appointment_date=(
@@ -155,12 +216,23 @@ class _SyntheticProfileFactory:
 class AuxiliaryRoundGenerator:
     """Materializa somente a rodada auxiliar solicitada, sem persistir perfis."""
 
-    def __init__(self, stream_key: bytes, *, locale: str = "pt_BR") -> None:
-        if len(stream_key) != 32:
-            raise ValueError("a chave do fluxo deve possuir 32 bytes")
+    def __init__(
+        self,
+        seed: int,
+        *,
+        schedule_id: str = "F0-F1",
+        locale: str = "pt_BR",
+    ) -> None:
+        self._seed_material = derive_seed_material(
+            seed,
+            namespace="auxiliary",
+            schedule_id=schedule_id,
+        )
         _assert_faker_version()
-        self._stream_key = stream_key
-        self._profiles = _SyntheticProfileFactory(stream_key, locale=locale)
+        self._profiles = _SyntheticProfileFactory(
+            self._seed_material,
+            locale=locale,
+        )
 
     def _position(self, round_id: int, sample_index: int) -> int:
         if round_id < 1 or round_id > AUXILIARY_ROUNDS:
@@ -207,8 +279,8 @@ class AuxiliaryRoundGenerator:
             conversations.append(
                 render_general_conversation(
                     template_id,
-                    entity_id=derive_key(
-                        self._stream_key,
+                    entity_id=derive_bytes(
+                        self._seed_material,
                         "GENERAL_ENTITY/v1",
                         round_id,
                         general_index,
@@ -220,7 +292,7 @@ class AuxiliaryRoundGenerator:
             )
 
         permuted = permuted_tuple(
-            self._stream_key,
+            self._seed_material,
             f"AUXILIARY_CONVERSATION_ORDER/v1/{round_id}",
             conversations,
         )
@@ -236,7 +308,7 @@ class AuxiliaryRoundGenerator:
         if round_id < 1 or round_id > AUXILIARY_ROUNDS:
             raise ValueError("round_id deve estar entre 1 e 20")
         offset = derive_integer(
-            self._stream_key, "GENERAL_RECORDS/v1", round_id
+            self._seed_material, "GENERAL_RECORDS/v1", round_id
         ) % len(GENERAL_CONVERSATION_TEMPLATE_IDS)
         return tuple(
             GENERAL_CONVERSATION_TEMPLATE_IDS[

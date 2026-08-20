@@ -18,8 +18,10 @@ from .generator import (
 )
 from .manifest import (
     append_round_manifest,
+    build_generation_manifest,
     build_round_manifest,
     build_victim_dataset_manifest,
+    write_generation_manifest,
     write_victim_dataset_manifest,
 )
 from .model import (
@@ -30,6 +32,10 @@ from .model import (
     CONVERSATION_GENERATOR_VERSION,
     CONVERSATION_SCHEMA_VERSION,
     DUPLICATE_ALLOWED_FIELD_TYPES,
+    EMAIL_DOMAIN_CATALOG_VERSION,
+    EMAIL_DOMAINS,
+    EMAIL_LOCAL_PART_MAX_LENGTH,
+    EMAIL_PATTERN_VERSION,
     PROFILE_FIELD_ORDER,
     UNIQUE_FIELD_TYPES,
     VICTIM_DATASET_SCHEMA_VERSION,
@@ -52,7 +58,6 @@ from .rendering import (
     CANONICAL_PROFILE_TEMPLATE,
     render_profile,
 )
-from .seeding import derive_stream_key
 from .storage import (
     ARTIFACT_METADATA_SCHEMA_VERSION,
     CONVERSATION_JSONL_SCHEMA_VERSION,
@@ -113,6 +118,10 @@ __all__ = [
     "CANONICAL_PREFIX_TEMPLATE",
     "CANONICAL_PROFILE_TEMPLATE",
     "DUPLICATE_ALLOWED_FIELD_TYPES",
+    "EMAIL_DOMAIN_CATALOG_VERSION",
+    "EMAIL_DOMAINS",
+    "EMAIL_LOCAL_PART_MAX_LENGTH",
+    "EMAIL_PATTERN_VERSION",
     "DatasetStorageError",
     "FieldAnnotation",
     "PROFILE_FIELD_ORDER",
@@ -125,11 +134,11 @@ __all__ = [
     "VictimClientDataset",
     "VictimDatasetGenerator",
     "append_round_manifest",
+    "build_generation_manifest",
     "build_round_manifest",
     "build_victim_dataset_manifest",
     "conversation_catalog_sha256",
     "cpf_has_valid_checksum",
-    "derive_stream_key",
     "profile_field_values",
     "read_auxiliary_round",
     "read_victim_client_dataset",
@@ -147,6 +156,7 @@ __all__ = [
     "validate_training_conversation",
     "validate_victim_dataset",
     "write_auxiliary_round",
+    "write_generation_manifest",
     "write_victim_datasets",
     "write_victim_dataset_manifest",
 ]
