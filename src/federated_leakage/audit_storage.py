@@ -21,6 +21,12 @@ from .audit_contracts import (
 from .synthetic_profiles.storage import validate_storage_component
 
 
+EXTRACTION_AUDIT_JOURNAL_SCHEMA_VERSION = "extraction-audit-journal/v2"
+TRUSTED_EVALUATOR_TARGET_MANIFEST_SCHEMA_VERSION = (
+    "trusted-evaluator-target-manifest/v2"
+)
+
+
 def _canonical_json_bytes(value: Any) -> bytes:
     return (
         json.dumps(
@@ -86,12 +92,16 @@ def _safe_component(value: str, label: str) -> str:
         raise ExtractionAuditError(f"{label} inválido") from error
 
 
-def _audit_id(checkpoint: AuditCheckpoint) -> str:
+def _audit_id(
+    checkpoint: AuditCheckpoint,
+    context: TrustedEvaluatorContext,
+) -> str:
+    budget = f"targets-{context.target_budget.target_count:03d}"
     if checkpoint.scenario == "B0":
-        return "B0-round-000"
+        return f"B0-{budget}-round-000"
     return (
         f"{checkpoint.scenario}-k{checkpoint.auxiliary_weight_units:02d}-"
-        f"round-{checkpoint.round_id:03d}"
+        f"{budget}-round-{checkpoint.round_id:03d}"
     )
 
 
@@ -114,9 +124,14 @@ def _registry_payload(context: TrustedEvaluatorContext) -> dict[str, Any]:
 
 def _target_payload(context: TrustedEvaluatorContext) -> dict[str, Any]:
     return {
-        "schema_version": "trusted-evaluator-target-manifest/v1",
+        "schema_version": TRUSTED_EVALUATOR_TARGET_MANIFEST_SCHEMA_VERSION,
         "experiment_seed": context.experiment_seed,
         "target_count": len(context.targets),
+        "target_budget": {
+            "schema_version": context.target_budget.schema_version,
+            "selection_strategy": context.target_budget.selection_strategy,
+            "target_count": context.target_budget.target_count,
+        },
         "target_schedule_sha256": context.target_schedule_sha256,
         "targets": [
             {
@@ -167,7 +182,7 @@ def _metadata_payload(
     generation_schedule_sha256: str,
 ) -> dict[str, Any]:
     return {
-        "schema_version": "extraction-audit-journal/v1",
+        "schema_version": EXTRACTION_AUDIT_JOURNAL_SCHEMA_VERSION,
         "run_id": run_id,
         "audit_id": audit_id,
         "scenario": checkpoint.scenario,
@@ -178,9 +193,16 @@ def _metadata_payload(
         "model_provenance": checkpoint.model_provenance.as_safe_dict(),
         "registry_sha256": context.registry_sha256,
         "target_schedule_sha256": context.target_schedule_sha256,
+        "target_budget": {
+            "schema_version": context.target_budget.schema_version,
+            "selection_strategy": context.target_budget.selection_strategy,
+            "target_count": context.target_budget.target_count,
+        },
         "prompt_catalog_sha256": context.prompt_catalog_sha256,
         "generation_schedule_sha256": generation_schedule_sha256,
-        "expected_generation_count": spec.expected_generation_count,
+        "expected_generation_count": spec.generation_count_for_targets(
+            context.target_budget.target_count
+        ),
         "spec": _spec_payload(spec),
     }
 
@@ -382,7 +404,7 @@ def prepare_audit_journal(
 
     validate_extraction_audit_spec(spec)
     resolved_run_id = _safe_component(run_id, "run_id")
-    audit_id = _safe_component(_audit_id(checkpoint), "audit_id")
+    audit_id = _safe_component(_audit_id(checkpoint, context), "audit_id")
     root = Path(output_root)
     if root.exists() and (root.is_symlink() or not root.is_dir()):
         raise ExtractionAuditError("raiz de saídas da auditoria é inválida")
@@ -428,8 +450,16 @@ def prepare_audit_journal(
         private_root / "protected_value_registry_evaluator_only.json",
         _registry_payload(context),
     )
+    target_manifest_root = private_root / "target_manifests"
+    if not target_manifest_root.exists():
+        _mkdir_private(target_manifest_root)
+    elif target_manifest_root.is_symlink() or not target_manifest_root.is_dir():
+        raise ExtractionAuditError("diretório de alvos da auditoria é inválido")
+    else:
+        os.chmod(target_manifest_root, 0o700)
     _ensure_private_manifest(
-        private_root / "audit_victim_name_manifest_evaluator_only.json",
+        target_manifest_root
+        / f"targets-{context.target_budget.target_count:03d}.json",
         _target_payload(context),
     )
 
@@ -487,8 +517,77 @@ def prepare_audit_journal(
         final_directory=final_directory,
         summary_path=summary_path,
         records=records,
-        expected_count=spec.expected_generation_count,
+        expected_count=spec.generation_count_for_targets(
+            context.target_budget.target_count
+        ),
     )
 
 
-__all__ = ["AuditJournal", "prepare_audit_journal"]
+def read_completed_audit_artifacts(
+    *,
+    output_root: Path,
+    run_id: str,
+    spec: AuditSpec,
+    context: TrustedEvaluatorContext,
+    checkpoint: AuditCheckpoint,
+    generation_schedule_sha256: str,
+) -> tuple[Tuple[AuditGenerationRecord, ...], dict[str, Any]] | None:
+    """Lê uma auditoria final somente quando toda sua identidade coincide."""
+
+    resolved_run_id = _safe_component(run_id, "run_id")
+    audit_id = _safe_component(_audit_id(checkpoint, context), "audit_id")
+    run_root = Path(output_root) / resolved_run_id
+    final_directory = run_root / "evaluator" / "private" / "audits" / audit_id
+    summary_path = run_root / "evaluator" / "summaries" / f"{audit_id}.json"
+    if not final_directory.exists() and not summary_path.exists():
+        return None
+    if (
+        final_directory.is_symlink()
+        or not final_directory.is_dir()
+        or summary_path.is_symlink()
+        or not summary_path.is_file()
+        or frozenset(path.name for path in final_directory.iterdir())
+        != frozenset({"metadata.json", "extraction_results.jsonl"})
+    ):
+        raise ExtractionAuditError("auditoria final armazenada é inválida")
+    metadata_path = final_directory / "metadata.json"
+    records_path = final_directory / "extraction_results.jsonl"
+    try:
+        metadata_raw = metadata_path.read_bytes()
+        summary_raw = summary_path.read_bytes()
+    except OSError as error:
+        raise ExtractionAuditError("auditoria final é inacessível") from error
+    metadata = _load_json(metadata_raw)
+    summary = _load_json(summary_raw)
+    expected_metadata = _metadata_payload(
+        resolved_run_id,
+        audit_id,
+        spec,
+        context,
+        checkpoint,
+        generation_schedule_sha256,
+    )
+    if (
+        metadata != expected_metadata
+        or _canonical_json_bytes(metadata) != metadata_raw
+        or _canonical_json_bytes(summary) != summary_raw
+    ):
+        raise ExtractionAuditError("auditoria final diverge da execução")
+    records = _load_records(records_path)
+    expected_count = spec.generation_count_for_targets(
+        context.target_budget.target_count
+    )
+    if len(records) != expected_count:
+        raise ExtractionAuditError("auditoria final possui contagem inválida")
+    os.chmod(metadata_path, 0o600)
+    os.chmod(records_path, 0o600)
+    os.chmod(summary_path, 0o600)
+    return records, summary
+
+
+__all__ = [
+    "AuditJournal",
+    "EXTRACTION_AUDIT_JOURNAL_SCHEMA_VERSION",
+    "prepare_audit_journal",
+    "read_completed_audit_artifacts",
+]

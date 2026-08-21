@@ -5,22 +5,28 @@
 O avaliador é o único componente que recebe simultaneamente os dez datasets das
 vítimas e um modelo global somente para leitura. `prepare_trusted_evaluator()`
 revalida os 10 clientes, reconstrói os 200 registros a partir das anotações e
-seleciona dois alvos por cliente. Nomes, valores e identificadores permanecem em
-objetos com representação redigida e nos artefatos privados do avaliador.
+constrói uma agenda mestre determinística e aninhada. O orçamento de 20 alvos
+seleciona exatamente dois por cliente; também são aceitos 1, 5 e 200 alvos.
+Nomes, valores e identificadores permanecem em objetos com representação
+redigida e nos artefatos privados do avaliador.
 
-Cada checkpoint produz exatamente:
+Para `n` alvos, cada checkpoint produz `45n + 100` gerações:
 
-- 100 consultas direcionadas de perfil completo, cinco por alvo;
-- 800 consultas específicas, cinco para cada par alvo-tipo;
+- `5n` consultas direcionadas de perfil completo;
+- `40n` consultas específicas, cinco para cada par alvo-tipo;
 - 100 consultas sem nome.
+
+Assim, os orçamentos de 1, 5, 20 e 200 alvos produzem respectivamente 145, 325,
+1.000 e 9.100 gerações.
 
 O catálogo de prompts `extraction-audit-prompt-catalog/v1` é a fonte de verdade.
 O prompt principal reutiliza `CANONICAL_PREFIX_TEMPLATE` e a continuação
 esperada reutiliza `CANONICAL_COMPLETION_TEMPLATE`. A seed das consultas deriva
-somente da seed do experimento, modo, posição do alvo, tipo e repetição. Cenário,
-rodada, `k` e hash do modelo não entram nessa derivação.
+somente da seed do experimento, modo, identidade técnica estável do alvo, tipo e
+repetição. Cenário, rodada, `k`, orçamento e hash do modelo não entram nessa
+derivação.
 
-## Uso pela futura orquestração
+## Uso pelo orquestrador
 
 O chamador prepara o contexto uma vez por seed e o reutiliza em todos os
 checkpoints:
@@ -37,11 +43,15 @@ from federated_leakage import (
 )
 
 audit_spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
-evaluator = prepare_trusted_evaluator(victim_datasets, experiment_seed=11)
+evaluator = prepare_trusted_evaluator(
+    victim_datasets,
+    experiment_seed=101,
+    target_count=20,
+)
 model_sha256 = fingerprint_model_parameters(model_bundle)
 checkpoint = AuditCheckpoint(
     scenario="B0",
-    experiment_seed=11,
+    experiment_seed=101,
     round_id=0,
     auxiliary_weight_units=None,
     expected_model_sha256=model_sha256,
@@ -53,7 +63,7 @@ result = run_extraction_audit(
     checkpoint,
     model_bundle,
     output_root=Path("outputs/runs"),
-    run_id="seed-11-B0",
+    run_id="pilot-seed-101-B0",
 )
 ```
 
@@ -82,8 +92,8 @@ dessas métricas altera o denominador exato principal.
 ```text
 outputs/runs/<run_id>/evaluator/
 ├── private/
-│   ├── audit_victim_name_manifest_evaluator_only.json
 │   ├── protected_value_registry_evaluator_only.json
+│   ├── target_manifests/targets-<NNN>.json
 │   └── audits/<audit_id>/extraction_results.jsonl
 └── summaries/<audit_id>.json
 ```
@@ -92,8 +102,10 @@ Diretórios usam modo `0700` e arquivos `0600`. Durante a execução, o JSONL fi
 em `<audit_id>.incomplete`; cada linha é UTF-8 canônica e sincronizada antes da
 próxima geração. A retomada revalida configuração, checkpoint, hashes, agenda e
 linhas já gravadas. Uma linha terminal interrompida é descartada, mas qualquer
-outra adulteração falha. Somente depois das 1.000 gerações o diretório é selado e
-o resumo seguro é publicado. Execuções concluídas nunca são sobrescritas.
+outra adulteração falha. Somente depois de todas as gerações do orçamento o
+diretório é selado e o resumo seguro é publicado. Uma auditoria concluída é
+relida e revalidada quando a mesma identidade é retomada; nunca é sobrescrita.
+O `audit_id` inclui `targets-001`, `targets-005`, `targets-020` ou `targets-200`.
 
 O JSONL privado contém prompts, gerações, seeds e identificadores técnicos. O
 resumo contém somente contexto do checkpoint, proveniência, contagens, métricas
@@ -102,6 +114,7 @@ servidor, clientes e adversário não recebem nenhum dos dois caminhos.
 
 ## Limites atuais
 
-Estão fora deste contrato: execução automática após todas as 20 rodadas,
-diagnósticos de perfis auxiliares, rank/NLL, controles negativos, canários,
-utilidade, F2/F3 e métricas das substituições F4/F5.
+O piloto B0/F0/F1 já invoca automaticamente a auditoria depois de cada uma das
+20 rodadas. Continuam fora deste contrato diagnósticos de perfis auxiliares,
+rank/NLL, controles negativos, canários, utilidade, F2/F3 e métricas das
+substituições F4/F5.

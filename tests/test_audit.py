@@ -104,8 +104,12 @@ def _bundle():
     )
 
 
-def _context(seed=11):
-    return prepare_trusted_evaluator(VictimDatasetGenerator(seed).generate(), seed)
+def _context(seed=11, target_count=20):
+    return prepare_trusted_evaluator(
+        VictimDatasetGenerator(seed).generate(),
+        seed,
+        target_count=target_count,
+    )
 
 
 def _checkpoint(context, bundle, *, scenario="B0", round_id=0, k=None):
@@ -154,6 +158,41 @@ class AuditConfigurationAndContextTests(unittest.TestCase):
             tuple(f"victim-{index:02d}" for index in range(1, 11) for _ in range(2)),
         )
         self.assertNotIn(first.targets[0].value("PERSON_NAME"), repr(first))
+
+    def test_target_budgets_are_nested_balanced_and_have_exact_counts(self):
+        spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        contexts = tuple(_context(101, count) for count in (1, 5, 20, 200))
+        target_sets = tuple(
+            {record.entity_id for record in context.targets} for context in contexts
+        )
+        self.assertTrue(
+            all(first < second for first, second in zip(target_sets, target_sets[1:]))
+        )
+        self.assertEqual(
+            tuple(len(_query_schedule(spec, context)) for context in contexts),
+            (145, 325, 1_000, 9_100),
+        )
+        twenty = contexts[2]
+        self.assertEqual(
+            tuple(
+                sum(record.client_id == f"victim-{index:02d}" for record in twenty.targets)
+                for index in range(1, 11)
+            ),
+            (2,) * 10,
+        )
+        shared = contexts[0].targets[0]
+        schedules = tuple(_query_schedule(spec, context) for context in contexts)
+        shared_seeds = []
+        for context, schedule in zip(contexts, schedules):
+            index = context.targets.index(shared)
+            shared_seeds.append(
+                tuple(
+                    query.generation_seed
+                    for query in schedule
+                    if query.mode == "primary" and query.target_index == index
+                )
+            )
+        self.assertEqual(len(set(shared_seeds)), 1)
 
     def test_rejects_recipe_drift_duplicate_yaml_and_invalid_dataset(self):
         config = yaml.safe_load(Path("configs/main-v1.yaml").read_text())
@@ -293,7 +332,7 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
                 resume=True,
             )
             journal.append(record)
-            path = root / "run-11/evaluator/private/audits/B0-round-000.incomplete/extraction_results.jsonl"
+            path = root / "run-11/evaluator/private/audits/B0-targets-020-round-000.incomplete/extraction_results.jsonl"
             with path.open("ab") as output:
                 output.write(b'{"partial":')
             resumed = prepare_audit_journal(
@@ -335,13 +374,23 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
                 output_root=Path(directory),
                 run_id="run-11",
             )
-            summary = Path(directory) / "run-11/evaluator/summaries/B0-round-000.json"
-            private = Path(directory) / "run-11/evaluator/private/audits/B0-round-000/extraction_results.jsonl"
+            summary = Path(directory) / "run-11/evaluator/summaries/B0-targets-020-round-000.json"
+            private = Path(directory) / "run-11/evaluator/private/audits/B0-targets-020-round-000/extraction_results.jsonl"
             self.assertTrue(summary.is_file())
             self.assertTrue(private.is_file())
             self.assertEqual(len(private.read_text().splitlines()), 1_000)
             self.assertEqual(len(self.bundle.model.calls), 1_000)
             self.assertEqual(result.generation_count, 1_000)
+            repeated = run_extraction_audit(
+                self.spec,
+                self.context,
+                self.checkpoint,
+                self.bundle,
+                output_root=Path(directory),
+                run_id="run-11",
+            )
+            self.assertEqual(repeated, result)
+            self.assertEqual(len(self.bundle.model.calls), 1_000)
             self.assertTrue(self.bundle.model.training)
             self.assertTrue(torch.equal(torch.random.get_rng_state(), rng_before))
             self.assertEqual(os.stat(summary).st_mode & 0o777, 0o600)
@@ -357,6 +406,7 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
                     self.bundle,
                     output_root=Path(directory),
                     run_id="run-11",
+                    resume=False,
                 )
 
     def test_unsafe_path_symlink_and_generation_failure_fail_closed(self):
@@ -409,10 +459,10 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
             self.assertNotIn("segredo-nao-expor", str(caught.exception))
             self.assertNotIn(protected_name, str(caught.exception))
             self.assertFalse(
-                (Path(directory) / "run-failure/evaluator/summaries/B0-round-000.json").exists()
+                (Path(directory) / "run-failure/evaluator/summaries/B0-targets-020-round-000.json").exists()
             )
             self.assertTrue(
-                (Path(directory) / "run-failure/evaluator/private/audits/B0-round-000.incomplete").is_dir()
+                (Path(directory) / "run-failure/evaluator/private/audits/B0-targets-020-round-000.incomplete").is_dir()
             )
 
 

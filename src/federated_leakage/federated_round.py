@@ -38,6 +38,7 @@ from .training_contracts import (
     LocalTrainingError,
     LocalTrainingResult,
     LocalTrainingSpec,
+    ModelParameterSnapshot,
     validate_local_training_spec,
 )
 
@@ -264,6 +265,12 @@ def _validate_round_result(result: object) -> FedAvgRoundResult:
     return result
 
 
+def validate_federated_round_result(result: object) -> FedAvgRoundResult:
+    """Valida um resultado seguro reconstruído de armazenamento local."""
+
+    return _validate_round_result(result)
+
+
 def _round_hashes(
     results: tuple[LocalTrainingResult, ...], weights: tuple[Any, ...]
 ) -> tuple[str, str, str, str]:
@@ -300,6 +307,7 @@ def run_non_private_federated_round(
     scenario: FedAvgScenario,
     round_id: int,
     auxiliary_weight_units: int,
+    initial_snapshot: ModelParameterSnapshot | None = None,
 ) -> FedAvgRoundResult:
     """Executa uma rodada F0/F1 com um único modelo local reutilizável."""
 
@@ -327,7 +335,12 @@ def run_non_private_federated_round(
     )
     previous_training_mode = bool(getattr(model_bundle.model, "training", False))
     try:
-        snapshot = capture_model_parameter_snapshot(model_bundle)
+        snapshot = (
+            capture_model_parameter_snapshot(model_bundle)
+            if initial_snapshot is None
+            else initial_snapshot
+        )
+        restore_model_parameter_snapshot(model_bundle, snapshot)
         accumulator = FedAvgAccumulator(
             aggregation_spec,
             weights,
@@ -486,4 +499,5 @@ __all__ = [
     "prepare_victim_training_inputs",
     "run_non_private_federated_round",
     "validate_paired_federated_round_results",
+    "validate_federated_round_result",
 ]

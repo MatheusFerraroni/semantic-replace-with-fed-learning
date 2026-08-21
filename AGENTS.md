@@ -138,6 +138,13 @@ todos os parâmetros do Tucano 2 0.6B.
   diagnóstico de aprendizado do gatilho e sobreajuste.
 - Executar o piloto de desenvolvimento documentado antes de congelar a receita
   principal. Não incluir sua semente nos resultados principais.
+- Executar o piloto retomável com seed `101`, `k=1`, B0 compartilhado, F0 antes
+  de F1 e 20 rodadas por trajetória. Auditar 20 alvos em B0 e após cada rodada;
+  auditar também 1, 5 e 200 alvos em B0 e na rodada 20 de F0/F1. Não congelar a
+  receita principal sem revisão humana explícita.
+- Manter checkpoints federados permanentes nas rodadas 1, 10 e 20 e somente um
+  checkpoint móvel nas demais. Persistir pesos exclusivamente em `safetensors`,
+  sem otimizadores, deltas, tokens, textos ou registros protegidos.
 - Reiniciar e reexecutar todos os cenários quando o artefato inicial mudar.
 
 ## Regras de implementação

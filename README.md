@@ -9,14 +9,15 @@ treinamento federado de todos os parâmetros do Tucano 2 0.6B.
 O repositório contém a especificação, o contrato do modelo, a configuração da
 campanha, o carregador validado do Tucano 2 e a implementação executável dos
 perfis e conversas sintéticas, da tokenização, do treinamento local não privado,
-do FedAvg de uma rodada F0/F1 e da auditoria central de extração. A orquestração
-retomável das 20 rodadas continua pendente.
+do FedAvg, da auditoria central de extração e do orquestrador retomável do piloto
+B0/F0/F1 de 20 rodadas. A campanha principal e as defesas continuam pendentes.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
 - [Configuração da campanha principal](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
+- [Orquestrador retomável do piloto](docs/pilot-orchestrator.md)
 
 | Componente | Estado executável |
 | --- | --- |
@@ -26,7 +27,7 @@ retomável das 20 rodadas continua pendente.
 | Tokenização e máscaras de perda | Implementado |
 | Treinamento local não privado | Implementado |
 | FedAvg e execução de uma rodada F0/F1 | Implementado |
-| Orquestração retomável de 20 rodadas | Não implementado |
+| Orquestração retomável do piloto B0/F0/F1 | Implementado |
 | DP-SGD e substituições semânticas | Não implementado |
 | Auditoria central de extração B0/F0/F1 | Implementado |
 | Diagnósticos auxiliares, rank/NLL e controles | Não implementado |
@@ -176,15 +177,15 @@ Em F4/F5, as métricas principais usam as substituições corretamente associada
 ao nome. Os valores originais servem somente para verificar a integridade do
 processo e permanecem exclusivos do avaliador.
 
-O núcleo executável atual cobre B0 e checkpoints F0/F1. Para cada modelo ele
-seleciona deterministicamente dois participantes por cliente e executa 100
-consultas de perfil completo, 800 consultas por campo e 100 consultas sem nome.
-As mesmas seleções, instruções e sementes são reutilizadas entre cenário,
-rodada e `k`. Antes da geração, o avaliador confirma com o tokenizador real que
-o prefixo é idêntico ao usado no treinamento e que nenhuma resposta esperada
-precisa de truncamento.
+O núcleo executável aceita orçamentos aninhados de 1, 5, 20 ou 200 participantes.
+O orçamento de referência usa 20 alvos, exatamente dois por cliente, e executa
+100 consultas de perfil completo, 800 consultas por campo e 100 consultas sem
+nome. As mesmas seleções, instruções e sementes por entidade são reutilizadas
+entre orçamento, cenário, rodada e `k`. Antes da geração, o avaliador confirma
+com o tokenizador real que o prefixo é idêntico ao usado no treinamento e que
+nenhuma resposta esperada precisa de truncamento.
 
-O avaliador verifica o fingerprint do modelo antes e depois das 1.000 gerações,
+O avaliador verifica o fingerprint do modelo antes e depois de cada auditoria,
 usa apenas a continuação decodificada para pontuação e restaura modo do modelo,
 RNG e opções determinísticas. Resultados brutos permanecem em
 `outputs/runs/<run_id>/evaluator/private/`; somente contagens, métricas, hashes e
@@ -192,8 +193,8 @@ proveniência entram no resumo em `evaluator/summaries/`. Ambos permanecem fora
 do Git e nenhum deles é devolvido a clientes, servidor ou adversário.
 
 A API e o formato dos artefatos estão documentados em
-[`docs/extraction-audit.md`](docs/extraction-audit.md). A camada não possui CLI
-científica porque os checkpoints federados atuais existem somente em memória.
+[`docs/extraction-audit.md`](docs/extraction-audit.md). O piloto invoca essa API
+automaticamente em B0 e depois de cada rodada federada.
 
 ## Preparar e validar o modelo
 
@@ -257,8 +258,8 @@ exceder 1.024 tokens. O collator aplica padding à direita com ID `49109`, másc
 de atenção zero e label `-100`, sem misturar clientes ou rodadas.
 
 Essa camada não persiste tokens. O forward pass e o otimizador pertencem ao
-treinador local descrito a seguir; a agregação de uma rodada é descrita depois
-dele, enquanto a orquestração das 20 rodadas continua pendente.
+treinador local descrito a seguir; a agregação e a orquestração consomem os
+objetos tokenizados somente em memória.
 
 ## Treinar um cliente localmente
 
@@ -301,8 +302,42 @@ são validados.
 
 Falhas descartam a soma parcial e restauram o modelo global bit a bit. O retorno
 contém apenas métricas agregadas, normas, hashes e proveniência segura. Essa API
-executa uma rodada F0 ou F1; ela não persiste pesos, não cria checkpoints e não
-orquestra a sequência completa de 20 rodadas.
+executa uma rodada F0 ou F1; a persistência e a sequência de 20 rodadas pertencem
+ao orquestrador do piloto.
+
+## Executar ou retomar o piloto B0/F0/F1
+
+O piloto fixado usa seed `101`, `k=1`, audita B0 uma vez, percorre F0 por 20
+rodadas, recarrega o baseline e percorre F1 por 20 rodadas. O orçamento de 20
+alvos é auditado em todos os 41 checkpoints; 1, 5 e 200 alvos são adicionados em
+B0 e na rodada 20 de cada trajetória. O total é de 44.000 conversas, 11.000
+passos locais e 69.710 gerações.
+
+Antes da execução longa, valide dados, modelo, tokenização e todos os orçamentos
+sem escrever saídas:
+
+```bash
+HF_HUB_OFFLINE=1 python -m federated_leakage.run_pilot \
+  --config configs/main-v1.yaml \
+  --device cuda \
+  --preflight-only
+```
+
+Para executar ou retomar:
+
+```bash
+HF_HUB_OFFLINE=1 python -m federated_leakage.run_pilot \
+  --config configs/main-v1.yaml \
+  --device cuda
+```
+
+O destino padrão é `outputs/`, com `run_id` `pilot-seed-101-k01`. Também são
+aceitos `--cache-dir`, `--model-artifact-dir`, `--output-root` e `--run-id`.
+`--fresh` recusa uma execução já existente; sem ele, artefatos compatíveis são
+revalidados e a execução continua do último checkpoint confirmado. Não existe
+fallback de modelo, revisão, dtype ou dispositivo. Consulte
+[`docs/pilot-orchestrator.md`](docs/pilot-orchestrator.md) antes da execução
+científica completa.
 
 ## Gerar um dataset para inspeção
 
@@ -331,8 +366,9 @@ os datasets 10×100 das vítimas, o pareamento benigno/adversário, escopos de
 perda, ordem canônica, anotações, colisões, round-trip JSONL, manifestos seguros,
 tokenização, máscaras, padding, perda por conversa, gradient accumulation,
 rollback, deltas em streaming, pesos FedAvg, aplicação atômica, pareamento F0/F1
-e auditoria de 1.000 consultas com persistência privada retomável, além do
-carregamento estrito e offline do modelo. Os
+e auditoria com orçamentos aninhados, checkpoints `safetensors`, retomada
+transacional e o piloto pareado simulado completo, além do carregamento estrito
+e offline do modelo. Os
 testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
 preparado:
 
@@ -351,12 +387,18 @@ python -m unittest tests.test_training_smoke -v
 HF_HUB_OFFLINE=1 \
 FEDERATED_RUN_AUDIT_SMOKE=1 \
 python -m unittest tests.test_audit_smoke -v
+
+HF_HUB_OFFLINE=1 \
+FEDERATED_RUN_PILOT_PREFLIGHT_SMOKE=1 \
+python -m unittest tests.test_pilot_smoke -v
 ```
 
 O smoke de auditoria executa uma consulta de cada modo, não sela um resultado
 científico e confirma que os parâmetros do modelo permanecem inalterados. O
 smoke de treinamento executa somente um passo lógico real e restaura o modelo.
-Ele não constitui uma atualização local válida nem grava pesos.
+Ele não constitui uma atualização local válida nem grava pesos. O smoke do
+piloto executa apenas o preflight real e não cria datasets, checkpoints nem
+auditorias persistidas.
 
 ## Limites
 

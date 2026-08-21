@@ -505,9 +505,10 @@ semantic_substitution:
 
 audit:
   schema_version: extraction-audit/v1
-  evaluator_schema_version: trusted-evaluator/v1
+  evaluator_schema_version: trusted-evaluator/v2
   record_schema_version: extraction-audit-record/v1
-  result_schema_version: extraction-audit-result/v1
+  result_schema_version: extraction-audit-result/v2
+  target_budget_schema_version: audit-target-budget/v1
   prompt_catalog_version: extraction-audit-prompt-catalog/v1
   owner: trusted_evaluator
   adversary_access: none
@@ -642,9 +643,23 @@ controls:
 pilot:
   required_before_main_campaign: true
   development_seeds: [101]
+  execution_schema_version: pilot-execution/v1
+  trajectory_schema_version: federated-trajectory/v1
+  checkpoint_schema_version: federated-checkpoint/v1
+  schedule_id: F0-F1
+  auxiliary_weight_units: 1
+  federated_rounds: 20
+  paired_execution: true
+  scenario_order: [B0, F0, F1]
   target_profile_counts: [1, 5, 20, 200]
+  reference_target_profile_count: 20
+  reference_audit_rounds: all
+  sensitivity_target_profile_counts: [1, 5, 200]
+  sensitivity_audit_checkpoints: [B0, F0-round-020, F1-round-020]
+  expected_generation_count: 69710
   scenarios: [B0, F0, F1]
   freeze_reference_recipe_after_pilot: true
+  freeze_requires_human_review: true
 
 statistics:
   independent_unit: training_seed
@@ -677,17 +692,23 @@ checkpoints:
   resume_granularity: completed_round
   incomplete_round_policy: discard_and_replay
   rolling_resume_contents:
-    - global_model
+    - global_model_bfloat16_safetensors
     - completed_round
-    - privacy_accountant_state_per_victim
-    - model_and_data_rng_states
-    - poisson_sampler_rng_state_per_victim
-    - auxiliary_generator_state_or_seed_derivation
-    - round_auxiliary_schedule_hash
+    - safe_federated_round_result
+    - model_fingerprint_and_provenance
+    - shared_baseline_and_B0_audit_hashes
+    - cpu_and_device_rng_states
     - resolved_config_hash
-    - victim_dataset_schedule_hashes
+    - victim_dataset_hash
+    - auxiliary_schedule_and_values_hashes
     - canonical_profile_template_hash
-    - completed_round_audit_marker
+    - completed_audit_markers_and_hashes
+  forbidden_checkpoint_contents:
+    - optimizer_states
+    - parameter_deltas
+    - tokens
+    - conversation_texts
+    - protected_records
   audit_rounds: all
 
 artifacts:
@@ -712,11 +733,16 @@ artifacts:
   raw_values_in_non_evaluator_metadata_or_manifests: forbidden
   raw_values_in_evaluator_private_registry: required
   evaluator_only:
-    - audit_victim_name_manifest_evaluator_only.json
     - protected_value_registry_evaluator_only.json
+    - target_manifests/targets-NNN.json
     - semantic_substitution_manifest_evaluator_only.jsonl
   extraction_audit:
     root: outputs/runs
+    evaluator_schema: trusted-evaluator/v2
+    result_schema: extraction-audit-result/v2
+    target_manifest_schema: trusted-evaluator-target-manifest/v2
+    journal_schema: extraction-audit-journal/v2
+    audit_id_includes_target_budget: true
     private_directory_mode: "0700"
     private_file_mode: "0600"
     resumable_journal: true

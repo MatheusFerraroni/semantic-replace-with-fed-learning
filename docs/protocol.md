@@ -425,9 +425,10 @@ CPU/`float32` e só é aplicada ao modelo depois da validação dos 11 clientes.
 
 Qualquer falha invalida a soma parcial e restaura o modelo global bit a bit. O
 resultado `federated-round/v1` contém somente métricas agregadas, normas, hashes
-e proveniência segura. A orquestração retomável das 20 rodadas, pontos de
-restauração e a invocação automática da auditoria após cada rodada permanecem
-etapas posteriores.
+e proveniência segura. O piloto B0/F0/F1 conecta esse núcleo a uma orquestração
+retomável de 20 rodadas por trajetória, checkpoints `safetensors` e auditoria
+automática após cada rodada. A campanha principal, F2-F5 e a varredura completa
+de `k` permanecem etapas posteriores.
 
 ## 7. Defesas
 
@@ -499,11 +500,11 @@ Somente o avaliador recebe os nomes e o mapa.
 ## 8. Auditoria
 
 O núcleo central descrito nas seções 8.1–8.3 está implementado para B0 e
-checkpoints F0/F1 pelos contratos `trusted-evaluator/v1` e
-`extraction-audit/v1`. A chamada permanece responsabilidade da futura
-orquestração das 20 rodadas. Diagnósticos auxiliares, rank/NLL, controles,
-canários e métricas de substituição continuam especificados, mas ainda não
-possuem executor.
+checkpoints F0/F1 pelos contratos `trusted-evaluator/v2`,
+`audit-target-budget/v1`, `extraction-audit/v1` e
+`extraction-audit-result/v2`. O piloto chama a auditoria automaticamente após
+cada rodada. Diagnósticos auxiliares, rank/NLL, controles, canários e métricas de
+substituição continuam especificados, mas ainda não possuem executor.
 
 Antes da execução, o avaliador seleciona de forma estratificada 20
 participantes-alvo, dois por cliente-vítima. Ele aplica ao modelo inicial e aos
@@ -617,8 +618,13 @@ O controle positivo com canários roda separadamente e nunca altera B0 ou F0-F5.
 Se ele falhar, a campanha é inconclusiva.
 
 Antes da campanha principal, uma semente de desenvolvimento executa B0, F0 e F1
-com `1`, `5`, `20` e `200` participantes-alvo. Depois do piloto, a receita é
-congelada. A semente de desenvolvimento não entra nos resultados.
+com seed `101` e `k=1`. O orçamento de referência de 20 participantes-alvo roda
+em B0 e após cada uma das 20 rodadas de F0/F1; 1, 5 e 200 alvos são adicionados
+somente em B0 e na rodada 20 de cada trajetória. Os conjuntos são aninhados e a
+seleção de 20 permanece balanceada em dois alvos por cliente. Isso totaliza
+69.710 gerações. Depois do piloto, a receita só pode ser congelada após revisão
+humana; a execução não altera a configuração automaticamente. A seed de
+desenvolvimento não entra nos resultados.
 
 ## 9. Utilidade e estatística
 
@@ -687,27 +693,27 @@ A execução falha se:
 Cada execução salva fora do Git:
 
 ```text
-run_config.yaml
-environment.txt
-dataset_generation_spec.yaml
-victim_dataset_manifest.json
-client_assignment_manifest.json
-outputs/runs/<run_id>/evaluator/private/audit_victim_name_manifest_evaluator_only.json
-round_auxiliary_manifest.jsonl
-training_metrics.jsonl
-outputs/runs/<run_id>/evaluator/private/audits/<audit_id>/extraction_results.jsonl
-outputs/runs/<run_id>/evaluator/summaries/<audit_id>.json
-utility_results.json
-outputs/runs/<run_id>/evaluator/private/protected_value_registry_evaluator_only.json
-semantic_substitution_manifest_evaluator_only.jsonl
-checkpoints/
-plots/
-outputs/datasets/<dataset_id>/clients/
+outputs/
+├── datasets/<dataset_id>/clients/
+│   ├── victim/<client_id>/conversations.jsonl
+│   └── auxiliary/F0-F1/<presentation>/round-N/conversations.jsonl
+└── runs/<run_id>/
+    ├── run_manifest.json
+    ├── baseline/evaluator/
+    ├── trajectories/<scenario>-k01/
+    │   ├── rounds/
+    │   ├── checkpoints/
+    │   ├── training_metrics.jsonl
+    │   ├── round_auxiliary_manifest.jsonl
+    │   └── evaluator/
+    ├── paired/
+    └── completed.json
 ```
 
 Os artefatos `evaluator_only` ficam fora do Git e são legíveis somente pelo
-avaliador. A implementação central grava registro, seleção e gerações em
-`outputs/runs/<run_id>/evaluator/private/` e publica somente métricas agregadas e
+avaliador. Em B0 ficam sob `baseline/evaluator/`; nas trajetórias, sob
+`trajectories/<scenario>-k01/evaluator/`. A implementação grava registro,
+seleção e gerações em `evaluator/private/` e publica somente métricas agregadas e
 hashes em `evaluator/summaries/`. O cliente adversário, os clientes-vítima
 durante treinamento e o servidor não recebem esses caminhos nem seus conteúdos.
 O avaliador não devolve instruções, gerações, métricas ou resultados ao
@@ -724,12 +730,14 @@ interno de derivação continuam apenas em memória.
 
 Pontos de restauração permanentes ficam nas rodadas 1, 10 e 20. O ponto de
 restauração para retomada é gravado atomicamente após agregação e auditoria. Ele
-contém o modelo global, a rodada concluída, os 10 contabilizadores de privacidade,
-estados de RNG do modelo, dados e amostradores, estado ou derivação inequívoca do
-gerador auxiliar, hashes da configuração e das agendas e marcador de auditoria
-concluída. O hash do template canônico também integra o ponto de restauração.
-Otimizadores locais reiniciam a cada cliente e rodada e não são preservados. Uma
-rodada incompleta é descartada e repetida integralmente.
+contém o modelo global BF16 em `safetensors`, resultado seguro da rodada,
+fingerprint, proveniência, hashes da configuração, datasets, agendas, template e
+auditorias, incluindo o hash B0 compartilhado, além dos estados RNG de CPU e do
+dispositivo. Otimizadores, deltas,
+tokens, textos e registros protegidos não são preservados. Nas demais rodadas,
+apenas um checkpoint móvel é mantido. Uma rodada incompleta é descartada e
+repetida integralmente; um checkpoint terminal completo só confirma a transação
+depois que todos os hashes forem revalidados.
 
 As conclusões se limitam ao modelo, dados sintéticos, capacidade adversária sem
 conhecimento das vítimas, condicionamento aplicado pelo avaliador, coeficiente

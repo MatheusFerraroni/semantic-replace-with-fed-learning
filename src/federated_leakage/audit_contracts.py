@@ -13,11 +13,13 @@ from .model_contracts import ModelProvenance
 from .synthetic_profiles.model import PROFILE_FIELD_ORDER
 
 
-TRUSTED_EVALUATOR_SCHEMA_VERSION = "trusted-evaluator/v1"
+TRUSTED_EVALUATOR_SCHEMA_VERSION = "trusted-evaluator/v2"
 EXTRACTION_AUDIT_SCHEMA_VERSION = "extraction-audit/v1"
 EXTRACTION_AUDIT_RECORD_SCHEMA_VERSION = "extraction-audit-record/v1"
-EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION = "extraction-audit-result/v1"
+EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION = "extraction-audit-result/v2"
 AUDIT_PROMPT_CATALOG_VERSION = "extraction-audit-prompt-catalog/v1"
+AUDIT_TARGET_BUDGET_SCHEMA_VERSION = "audit-target-budget/v1"
+ALLOWED_AUDIT_TARGET_COUNTS = (1, 5, 20, 200)
 
 AuditScenario = Literal["B0", "F0", "F1"]
 AuditMode = Literal["primary", "field_specific", "untargeted"]
@@ -61,13 +63,25 @@ class AuditSpec:
 
     @property
     def expected_generation_count(self) -> int:
+        return self.generation_count_for_targets(self.target_profiles)
+
+    def generation_count_for_targets(self, target_count: int) -> int:
         return (
-            self.target_profiles * self.generation_seeds_per_target
-            + self.target_profiles
+            target_count * self.generation_seeds_per_target
+            + target_count
             * len(TARGET_FIELD_TYPES)
             * self.field_generations_per_pair
             + self.untargeted_generations
         )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuditTargetBudget:
+    """Quantidade de vítimas consultadas sem alterar a receita de geração."""
+
+    target_count: int
+    selection_strategy: str = "nested_stratified_by_victim_client/v1"
+    schema_version: str = AUDIT_TARGET_BUDGET_SCHEMA_VERSION
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -88,6 +102,7 @@ class TrustedEvaluatorContext:
     experiment_seed: int
     registry: Tuple[ProtectedEntityRecord, ...] = field(repr=False)
     targets: Tuple[ProtectedEntityRecord, ...] = field(repr=False)
+    target_budget: AuditTargetBudget
     registry_sha256: str
     target_schedule_sha256: str
     prompt_catalog_sha256: str
@@ -194,7 +209,9 @@ class ExtractionAuditResult:
                 / self.targeted_exact_pair_denominator,
                 "targeted_complete_generation_rate": self.targeted_complete_generation_count
                 / self.primary_generation_count,
-                "targeted_ordered_complete_generation_rate": self.targeted_ordered_complete_generation_count
+                "targeted_ordered_complete_generation_rate": (
+                    self.targeted_ordered_complete_generation_count
+                )
                 / self.primary_generation_count,
                 "targeted_any_field_profile_exposure_rate": self.targeted_exposed_profile_count
                 / self.target_count,
@@ -261,6 +278,21 @@ def validate_extraction_audit_spec(spec: object) -> AuditSpec:
     return spec
 
 
+def validate_audit_target_budget(budget: object) -> AuditTargetBudget:
+    """Aceita somente os quatro orçamentos declarados para o piloto."""
+
+    if (
+        not isinstance(budget, AuditTargetBudget)
+        or budget.schema_version != AUDIT_TARGET_BUDGET_SCHEMA_VERSION
+        or type(budget.target_count) is not int
+        or budget.target_count not in ALLOWED_AUDIT_TARGET_COUNTS
+        or budget.selection_strategy
+        != "nested_stratified_by_victim_client/v1"
+    ):
+        raise ExtractionAuditError("orçamento de alvos da auditoria é inválido")
+    return budget
+
+
 def _is_sha256(value: object) -> bool:
     return (
         isinstance(value, str)
@@ -274,18 +306,24 @@ def validate_extraction_audit_result(result: object) -> ExtractionAuditResult:
 
     if not isinstance(result, ExtractionAuditResult):
         raise ExtractionAuditError("resultado da auditoria é inválido")
+    target_count = result.target_count if isinstance(result, ExtractionAuditResult) else 0
+    if type(target_count) is not int or target_count not in ALLOWED_AUDIT_TARGET_COUNTS:
+        raise ExtractionAuditError("quantidade de alvos do resultado é inválida")
+    primary_count = target_count * 5
+    field_specific_count = target_count * len(TARGET_FIELD_TYPES) * 5
+    pair_denominator = target_count * len(TARGET_FIELD_TYPES)
+    generation_count = primary_count + field_specific_count + 100
     if (
         result.schema_version != EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION
         or result.audit_schema_version != EXTRACTION_AUDIT_SCHEMA_VERSION
         or result.scenario not in {"B0", "F0", "F1"}
         or type(result.experiment_seed) is not int
         or result.experiment_seed < 0
-        or result.generation_count != 1_000
-        or result.primary_generation_count != 100
-        or result.field_specific_generation_count != 800
+        or result.generation_count != generation_count
+        or result.primary_generation_count != primary_count
+        or result.field_specific_generation_count != field_specific_count
         or result.untargeted_generation_count != 100
-        or result.target_count != 20
-        or result.targeted_exact_pair_denominator != 160
+        or result.targeted_exact_pair_denominator != pair_denominator
         or not isinstance(result.model_provenance, ModelProvenance)
         or any(
             not _is_sha256(value)
@@ -311,14 +349,14 @@ def validate_extraction_audit_result(result: object) -> ExtractionAuditResult:
     ):
         raise ExtractionAuditError("resultado federado possui dimensão inválida")
     bounded = (
-        (result.targeted_exact_pair_count, 160),
-        (result.targeted_partial_pair_count, 160),
-        (result.targeted_complete_generation_count, 100),
-        (result.targeted_ordered_complete_generation_count, 100),
-        (result.targeted_exposed_profile_count, 20),
-        (result.total_exact_reproductions, 800),
-        (result.field_specific_exact_pair_count, 160),
-        (result.field_specific_partial_pair_count, 160),
+        (result.targeted_exact_pair_count, pair_denominator),
+        (result.targeted_partial_pair_count, pair_denominator),
+        (result.targeted_complete_generation_count, primary_count),
+        (result.targeted_ordered_complete_generation_count, primary_count),
+        (result.targeted_exposed_profile_count, target_count),
+        (result.total_exact_reproductions, primary_count * len(TARGET_FIELD_TYPES)),
+        (result.field_specific_exact_pair_count, pair_denominator),
+        (result.field_specific_partial_pair_count, pair_denominator),
         (result.untargeted_exposed_profile_count, 200),
     )
     unbounded_nonnegative = (
@@ -342,10 +380,10 @@ def validate_extraction_audit_result(result: object) -> ExtractionAuditResult:
         or tuple(metric.field_type for metric in result.field_metrics)
         != TARGET_FIELD_TYPES
         or any(
-            metric.denominator != 20
+            metric.denominator != target_count
             or type(metric.exact_count) is not int
             or type(metric.partial_count) is not int
-            or not 0 <= metric.exact_count <= metric.partial_count <= 20
+            or not 0 <= metric.exact_count <= metric.partial_count <= target_count
             for metric in result.field_metrics
         )
     ):
@@ -471,6 +509,8 @@ def load_extraction_audit_spec_from_config(path: Path) -> AuditSpec:
 
 
 __all__ = [
+    "ALLOWED_AUDIT_TARGET_COUNTS",
+    "AUDIT_TARGET_BUDGET_SCHEMA_VERSION",
     "AUDIT_PROMPT_CATALOG_VERSION",
     "EXTRACTION_AUDIT_RECORD_SCHEMA_VERSION",
     "EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION",
@@ -480,6 +520,7 @@ __all__ = [
     "AuditGenerationRecord",
     "AuditGenerationSpec",
     "AuditSpec",
+    "AuditTargetBudget",
     "ExtractionAuditError",
     "ExtractionAuditResult",
     "FieldAuditMetric",
@@ -490,4 +531,5 @@ __all__ = [
     "parse_extraction_audit_spec",
     "validate_extraction_audit_spec",
     "validate_extraction_audit_result",
+    "validate_audit_target_budget",
 ]
