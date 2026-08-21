@@ -8,14 +8,15 @@ treinamento federado de todos os parâmetros do Tucano 2 0.6B.
 
 O repositório contém a especificação, o contrato do modelo, a configuração da
 campanha, o carregador validado do Tucano 2 e a implementação executável dos
-perfis e conversas sintéticas, da tokenização e do treinamento local não privado
-de um cliente. O FedAvg e o executor em memória de uma rodada F0/F1 também estão
-implementados; a orquestração retomável das 20 rodadas continua pendente.
+perfis e conversas sintéticas, da tokenização, do treinamento local não privado,
+do FedAvg de uma rodada F0/F1 e da auditoria central de extração. A orquestração
+retomável das 20 rodadas continua pendente.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
 - [Configuração da campanha principal](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
+- [Avaliador confiável e auditoria central](docs/extraction-audit.md)
 
 | Componente | Estado executável |
 | --- | --- |
@@ -27,7 +28,8 @@ implementados; a orquestração retomável das 20 rodadas continua pendente.
 | FedAvg e execução de uma rodada F0/F1 | Implementado |
 | Orquestração retomável de 20 rodadas | Não implementado |
 | DP-SGD e substituições semânticas | Não implementado |
-| Auditoria, extração e métricas | Não implementado |
+| Auditoria central de extração B0/F0/F1 | Implementado |
+| Diagnósticos auxiliares, rank/NLL e controles | Não implementado |
 
 ## Modelo de ameaça
 
@@ -174,6 +176,25 @@ Em F4/F5, as métricas principais usam as substituições corretamente associada
 ao nome. Os valores originais servem somente para verificar a integridade do
 processo e permanecem exclusivos do avaliador.
 
+O núcleo executável atual cobre B0 e checkpoints F0/F1. Para cada modelo ele
+seleciona deterministicamente dois participantes por cliente e executa 100
+consultas de perfil completo, 800 consultas por campo e 100 consultas sem nome.
+As mesmas seleções, instruções e sementes são reutilizadas entre cenário,
+rodada e `k`. Antes da geração, o avaliador confirma com o tokenizador real que
+o prefixo é idêntico ao usado no treinamento e que nenhuma resposta esperada
+precisa de truncamento.
+
+O avaliador verifica o fingerprint do modelo antes e depois das 1.000 gerações,
+usa apenas a continuação decodificada para pontuação e restaura modo do modelo,
+RNG e opções determinísticas. Resultados brutos permanecem em
+`outputs/runs/<run_id>/evaluator/private/`; somente contagens, métricas, hashes e
+proveniência entram no resumo em `evaluator/summaries/`. Ambos permanecem fora
+do Git e nenhum deles é devolvido a clientes, servidor ou adversário.
+
+A API e o formato dos artefatos estão documentados em
+[`docs/extraction-audit.md`](docs/extraction-audit.md). A camada não possui CLI
+científica porque os checkpoints federados atuais existem somente em memória.
+
 ## Preparar e validar o modelo
 
 As dependências de modelo são opcionais para manter o gerador leve:
@@ -310,7 +331,8 @@ os datasets 10×100 das vítimas, o pareamento benigno/adversário, escopos de
 perda, ordem canônica, anotações, colisões, round-trip JSONL, manifestos seguros,
 tokenização, máscaras, padding, perda por conversa, gradient accumulation,
 rollback, deltas em streaming, pesos FedAvg, aplicação atômica, pareamento F0/F1
-e o carregamento estrito e offline do modelo. Os
+e auditoria de 1.000 consultas com persistência privada retomável, além do
+carregamento estrito e offline do modelo. Os
 testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
 preparado:
 
@@ -325,9 +347,15 @@ python -m unittest tests.test_tokenization_smoke -v
 HF_HUB_OFFLINE=1 \
 FEDERATED_RUN_TRAINING_SMOKE=1 \
 python -m unittest tests.test_training_smoke -v
+
+HF_HUB_OFFLINE=1 \
+FEDERATED_RUN_AUDIT_SMOKE=1 \
+python -m unittest tests.test_audit_smoke -v
 ```
 
-O smoke de treinamento executa somente um passo lógico real e restaura o modelo.
+O smoke de auditoria executa uma consulta de cada modo, não sela um resultado
+científico e confirma que os parâmetros do modelo permanecem inalterados. O
+smoke de treinamento executa somente um passo lógico real e restaura o modelo.
 Ele não constitui uma atualização local válida nem grava pesos.
 
 ## Limites

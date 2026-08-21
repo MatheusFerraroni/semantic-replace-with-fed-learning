@@ -426,7 +426,8 @@ CPU/`float32` e só é aplicada ao modelo depois da validação dos 11 clientes.
 Qualquer falha invalida a soma parcial e restaura o modelo global bit a bit. O
 resultado `federated-round/v1` contém somente métricas agregadas, normas, hashes
 e proveniência segura. A orquestração retomável das 20 rodadas, pontos de
-restauração e auditorias após cada rodada permanecem etapas posteriores.
+restauração e a invocação automática da auditoria após cada rodada permanecem
+etapas posteriores.
 
 ## 7. Defesas
 
@@ -496,6 +497,13 @@ substituição correta. Gerar valor pertencente a outro nome é associação inc
 Somente o avaliador recebe os nomes e o mapa.
 
 ## 8. Auditoria
+
+O núcleo central descrito nas seções 8.1–8.3 está implementado para B0 e
+checkpoints F0/F1 pelos contratos `trusted-evaluator/v1` e
+`extraction-audit/v1`. A chamada permanece responsabilidade da futura
+orquestração das 20 rodadas. Diagnósticos auxiliares, rank/NLL, controles,
+canários e métricas de substituição continuam especificados, mas ainda não
+possuem executor.
 
 Antes da execução, o avaliador seleciona de forma estratificada 20
 participantes-alvo, dois por cliente-vítima. Ele aplica ao modelo inicial e aos
@@ -581,6 +589,13 @@ O avaliador exige que cada valor direcionado pertença ao mesmo nome usado na
 instrução. Valor de outra vítima é associação incorreta, não acerto. Uma
 correspondência exata normaliza somente Unicode NFC e espaços; caixa, pontuação
 e dígitos permanecem.
+
+Na implementação central, as cinco gerações são deduplicadas por par
+`(nome, tipo)` para o recall principal. Perfil completo e perfil ordenado usam
+as 100 gerações como denominador; qualquer exposição usa os 20 participantes.
+Sem nome, valores repetíveis são deduplicados por `(tipo, valor)`, pois a saída
+não permite atribuí-los a uma entidade específica. Levenshtein com limiar 0,80 é
+somente diagnóstico e não altera a correspondência exata.
 
 Os diagnósticos auxiliares usam amostras determinísticas dos perfis gerados na
 rodada atual e, separadamente, dos perfis acumulados de rodadas anteriores. Eles
@@ -677,22 +692,26 @@ environment.txt
 dataset_generation_spec.yaml
 victim_dataset_manifest.json
 client_assignment_manifest.json
-audit_victim_name_manifest_evaluator_only.json
+outputs/runs/<run_id>/evaluator/private/audit_victim_name_manifest_evaluator_only.json
 round_auxiliary_manifest.jsonl
 training_metrics.jsonl
-extraction_results.jsonl
+outputs/runs/<run_id>/evaluator/private/audits/<audit_id>/extraction_results.jsonl
+outputs/runs/<run_id>/evaluator/summaries/<audit_id>.json
 utility_results.json
-protected_value_registry_evaluator_only.json
+outputs/runs/<run_id>/evaluator/private/protected_value_registry_evaluator_only.json
 semantic_substitution_manifest_evaluator_only.jsonl
 checkpoints/
 plots/
 outputs/datasets/<dataset_id>/clients/
 ```
 
-Os três artefatos `evaluator_only` ficam fora do Git e são legíveis somente pelo
-avaliador. O cliente adversário, os clientes-vítima durante treinamento e o
-servidor não recebem seus conteúdos. O avaliador não devolve suas instruções,
-gerações, métricas ou resultados ao adversário.
+Os artefatos `evaluator_only` ficam fora do Git e são legíveis somente pelo
+avaliador. A implementação central grava registro, seleção e gerações em
+`outputs/runs/<run_id>/evaluator/private/` e publica somente métricas agregadas e
+hashes em `evaluator/summaries/`. O cliente adversário, os clientes-vítima
+durante treinamento e o servidor não recebem esses caminhos nem seus conteúdos.
+O avaliador não devolve instruções, gerações, métricas ou resultados ao
+adversário.
 
 `victim_dataset_manifest.json`, `client_assignment_manifest.json` e
 `round_auxiliary_manifest.jsonl` registram somente versões, contagens,

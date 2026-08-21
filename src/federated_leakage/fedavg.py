@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Tuple
 
@@ -18,6 +16,7 @@ from .aggregation_contracts import (
     validate_fedavg_spec,
 )
 from .model_contracts import LoadedModelBundle, ModelProvenance
+from .model_fingerprint import fingerprint_named_tensors
 from .model_updates import (
     _validate_model_parameters,
     _validate_snapshot,
@@ -30,6 +29,15 @@ from .training_contracts import (
     ModelParameterSnapshot,
     ParameterDelta,
 )
+
+
+def _fingerprint_named_tensors(domain, named_tensors):
+    """Compatibilidade interna preservando o contrato de falha do FedAvg."""
+
+    try:
+        return fingerprint_named_tensors(named_tensors, domain=domain)
+    except Exception as error:
+        raise FedAvgError("falha ao calcular fingerprint de parâmetros") from error
 
 
 def _load_torch():
@@ -85,47 +93,6 @@ def resolve_fedavg_client_weights(
     ):
         raise FedAvgError("pesos FedAvg não satisfazem a receita normativa")
     return weights
-
-
-def _tensor_header(name: str, tensor: Any) -> bytes:
-    return json.dumps(
-        {
-            "dtype": str(tensor.dtype).removeprefix("torch."),
-            "name": name,
-            "shape": list(tensor.shape),
-        },
-        ensure_ascii=True,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("ascii")
-
-
-def _update_tensor_digest(digest: Any, name: str, tensor: Any) -> None:
-    torch = _load_torch()
-    try:
-        resolved = tensor.detach().to(device="cpu").contiguous()
-        header = _tensor_header(name, resolved)
-        raw = resolved.reshape(-1).view(torch.uint8).numpy()
-        digest.update(len(header).to_bytes(8, "big"))
-        digest.update(header)
-        digest.update(resolved.numel().to_bytes(8, "big"))
-        digest.update(memoryview(raw))
-    except Exception as error:
-        raise FedAvgError("falha ao calcular fingerprint de parâmetros") from error
-
-
-def _fingerprint_named_tensors(
-    domain: bytes, named_tensors: Iterable[tuple[str, Any]]
-) -> str:
-    digest = hashlib.sha256()
-    digest.update(domain)
-    count = 0
-    for name, tensor in named_tensors:
-        _update_tensor_digest(digest, name, tensor)
-        count += 1
-    if count == 0:
-        raise FedAvgError("fingerprint não contém parâmetros")
-    return digest.hexdigest()
 
 
 def _is_sha256(value: object) -> bool:
