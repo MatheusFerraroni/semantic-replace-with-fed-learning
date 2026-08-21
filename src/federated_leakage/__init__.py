@@ -1,5 +1,23 @@
 """Implementação do experimento de reprodução em treinamento federado."""
 
+from .aggregation_contracts import (
+    FEDAVG_AGGREGATION_SCHEMA_VERSION,
+    FEDERATED_ROUND_SCHEMA_VERSION,
+    FedAvgClientWeight,
+    FedAvgError,
+    FedAvgRoundResult,
+    FedAvgSpec,
+    load_fedavg_spec_from_config,
+)
+from .fedavg import resolve_fedavg_client_weights
+from .federated_round import (
+    PreparedAuxiliaryTrainingInput,
+    PreparedVictimTrainingInputs,
+    prepare_auxiliary_training_input,
+    prepare_victim_training_inputs,
+    run_non_private_federated_round,
+    validate_paired_federated_round_results,
+)
 from .model_loading import (
     BASE_MODEL_ID,
     BASE_MODEL_REVISION,
@@ -60,6 +78,12 @@ __all__ = [
     "DEFAULT_MODEL_CACHE",
     "EXPECTED_PARAMETER_COUNT",
     "EXPECTED_TOKENIZER_FINGERPRINT",
+    "FEDAVG_AGGREGATION_SCHEMA_VERSION",
+    "FEDERATED_ROUND_SCHEMA_VERSION",
+    "FedAvgClientWeight",
+    "FedAvgError",
+    "FedAvgRoundResult",
+    "FedAvgSpec",
     "LABEL_IGNORE_INDEX",
     "LOCAL_MODEL_UPDATE_SCHEMA_VERSION",
     "LOCAL_TRAINING_SCHEMA_VERSION",
@@ -79,6 +103,8 @@ __all__ = [
     "ModelParameterSnapshot",
     "PAD_TOKEN_ID",
     "ParameterDelta",
+    "PreparedAuxiliaryTrainingInput",
+    "PreparedVictimTrainingInputs",
     "TOKENIZED_CONVERSATION_SCHEMA_VERSION",
     "TokenizationError",
     "TokenizedBatch",
@@ -86,14 +112,20 @@ __all__ = [
     "collate_tokenized_conversations",
     "capture_model_parameter_snapshot",
     "iter_local_parameter_deltas",
+    "load_fedavg_spec_from_config",
     "load_model_bundle",
     "load_local_training_spec_from_config",
     "mean_conversation_causal_loss",
     "parse_model_spec",
     "prepare_huggingface_model",
+    "prepare_auxiliary_training_input",
+    "prepare_victim_training_inputs",
+    "resolve_fedavg_client_weights",
+    "run_non_private_federated_round",
     "tokenize_training_conversation",
     "tokenize_training_conversations",
     "train_local_client",
+    "validate_paired_federated_round_results",
     "validate_local_artifact",
     "validate_tokenized_conversation",
 ]

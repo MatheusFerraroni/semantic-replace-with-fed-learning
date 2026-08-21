@@ -374,6 +374,8 @@ campaign_matrix:
   total_main_campaign_runs: 405
 
 federated:
+  aggregation_schema_version: fedavg-aggregation/v1
+  round_schema_version: federated-round/v1
   victim_clients: 10
   auxiliary_slots: 1
   total_clients: 11
@@ -387,6 +389,9 @@ federated:
   aggregation_dtype: float32
   trainable_parameters: all
   client_execution: sequential
+  client_order: victim_01_to_10_then_auxiliary
+  accumulator_device: cpu
+  global_update_application: atomic_float32_then_bfloat16
 
 server:
   behavior: honest

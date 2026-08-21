@@ -9,7 +9,8 @@ treinamento federado de todos os parâmetros do Tucano 2 0.6B.
 O repositório contém a especificação, o contrato do modelo, a configuração da
 campanha, o carregador validado do Tucano 2 e a implementação executável dos
 perfis e conversas sintéticas, da tokenização e do treinamento local não privado
-de um cliente. A agregação federada ainda não foi implementada.
+de um cliente. O FedAvg e o executor em memória de uma rodada F0/F1 também estão
+implementados; a orquestração retomável das 20 rodadas continua pendente.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
@@ -23,7 +24,8 @@ de um cliente. A agregação federada ainda não foi implementada.
 | Preparação e carga validada do Tucano 2 | Implementado |
 | Tokenização e máscaras de perda | Implementado |
 | Treinamento local não privado | Implementado |
-| FedAvg e orquestração de rodadas | Não implementado |
+| FedAvg e execução de uma rodada F0/F1 | Implementado |
+| Orquestração retomável de 20 rodadas | Não implementado |
 | DP-SGD e substituições semânticas | Não implementado |
 | Auditoria, extração e métricas | Não implementado |
 
@@ -234,7 +236,8 @@ exceder 1.024 tokens. O collator aplica padding à direita com ID `49109`, másc
 de atenção zero e label `-100`, sem misturar clientes ou rodadas.
 
 Essa camada não persiste tokens. O forward pass e o otimizador pertencem ao
-treinador local descrito a seguir; a agregação federada continua pendente.
+treinador local descrito a seguir; a agregação de uma rodada é descrita depois
+dele, enquanto a orquestração das 20 rodadas continua pendente.
 
 ## Treinar um cliente localmente
 
@@ -253,13 +256,32 @@ implementação de atenção `eager` fixada na configuração.
 Antes do treinamento, `capture_model_parameter_snapshot()` cria uma cópia
 efêmera em CPU/BF16. Falhas restauram esse estado e não devolvem resultado
 parcial. Em sucesso, `iter_local_parameter_deltas()` expõe deltas não escalados
-em CPU/`float32`, um parâmetro por vez, para consumo futuro pelo FedAvg. Snapshot,
+em CPU/`float32`, um parâmetro por vez, para consumo imediato pelo FedAvg. Snapshot,
 gradientes, parâmetros e deltas nunca são persistidos por essa camada.
 
 O estado aleatório do PyTorch deriva da única seed do experimento, cliente e
 rodada. Cenário, apresentação auxiliar e `k` não entram na derivação. A
 repetibilidade bit a bit é exigida no mesmo dispositivo e ambiente, não entre
 CPU, CUDA e MPS.
+
+## Agregar uma rodada F0/F1
+
+`prepare_victim_training_inputs()` valida e tokeniza os dez datasets estáveis
+uma única vez. `prepare_auxiliary_training_input()` faz o mesmo para uma
+apresentação de uma rodada auxiliar. Os objetos preparados não carregam texto,
+anotações, valores protegidos nem `entity_id` e permanecem somente em memória.
+
+`run_non_private_federated_round()` restaura o mesmo snapshot global antes de
+cada um dos 11 clientes, executa o treinamento local em ordem e entrega somente
+o fluxo de deltas ao acumulador FedAvg. Para um valor `k`, cada vítima recebe
+peso `1/(10+k)` e o único auxiliar recebe `k/(10+k)`. A soma é calculada em
+CPU/`float32` e aplicada atomicamente ao modelo BF16 depois que todos os clientes
+são validados.
+
+Falhas descartam a soma parcial e restauram o modelo global bit a bit. O retorno
+contém apenas métricas agregadas, normas, hashes e proveniência segura. Essa API
+executa uma rodada F0 ou F1; ela não persiste pesos, não cria checkpoints e não
+orquestra a sequência completa de 20 rodadas.
 
 ## Gerar um dataset para inspeção
 
@@ -287,7 +309,8 @@ Os testes cobrem a regressão v4 dos e-mails, a estabilidade v3 dos demais campo
 os datasets 10×100 das vítimas, o pareamento benigno/adversário, escopos de
 perda, ordem canônica, anotações, colisões, round-trip JSONL, manifestos seguros,
 tokenização, máscaras, padding, perda por conversa, gradient accumulation,
-rollback, deltas em streaming e o carregamento estrito e offline do modelo. Os
+rollback, deltas em streaming, pesos FedAvg, aplicação atômica, pareamento F0/F1
+e o carregamento estrito e offline do modelo. Os
 testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
 preparado:
 

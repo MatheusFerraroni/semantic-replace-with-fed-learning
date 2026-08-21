@@ -309,11 +309,12 @@ AMP, `GradScaler`, clipping, packing, shuffle e fallback de dispositivo não sã
 usados. O carregador exige a implementação de atenção `eager`, e o treinador
 rejeita um bundle carregado com outra implementação.
 
-Cada cliente recebe um modelo exclusivo e um snapshot inicial efêmero em
-CPU/BF16. Qualquer falha restaura o snapshot e invalida a execução parcial. Em
+Cada cliente recebe uso exclusivo do modelo durante sua execução e o mesmo
+snapshot global inicial efêmero em CPU/BF16. Qualquer falha restaura o snapshot
+e invalida a execução parcial. Em
 sucesso, `local-model-update/v1` emite deltas não escalados em CPU/`float32`, um
-parâmetro por vez, sem persistência. O futuro FedAvg deverá consumir esse fluxo
-imediatamente. Métricas locais contêm somente agregados, hashes técnicos e a
+parâmetro por vez, sem persistência. O FedAvg consome esse fluxo imediatamente.
+Métricas locais contêm somente agregados, hashes técnicos e a
 proveniência segura do modelo.
 
 A seed interna do PyTorch deriva da única seed do experimento, do cliente e da
@@ -406,13 +407,26 @@ rodadas. Cada cliente começa do mesmo modelo global. Com coeficiente auxiliar
 `alpha`, cada vítima recebe `(1-alpha)/10`; os pesos somam `1.0` e os deltas são
 acumulados em `float32`.
 
+Na varredura de massa, `k` é mantido como quantidade inteira de unidades. Cada
+vítima recebe `1/(10+k)` e o único auxiliar físico recebe `k/(10+k)`. A soma dos
+numeradores é validada contra o denominador antes da conversão numérica. O valor
+de `k` não participa das sementes, dados, passos locais nem escala o delta
+submetido.
+
 Cada conversa é uma unidade de treinamento. Uma época sobre 100 conversas, com
 lote lógico 4, produz 25 passos por cliente. A execução sequencial economiza
 memória, mas o estado de um cliente nunca inicializa o seguinte.
 
-O núcleo local e o fluxo transitório de deltas estão implementados. A
-acumulação ponderada desses deltas, a atualização do modelo global e a
-orquestração das 20 rodadas permanecem etapas posteriores.
+O núcleo local, o fluxo transitório de deltas e `fedavg-aggregation/v1` estão
+implementados para uma rodada F0/F1. Um único modelo é reutilizado
+sequencialmente: o snapshot global BF16 é restaurado antes de cada cliente, e o
+servidor lógico recebe somente os deltas. A soma ponderada permanece em
+CPU/`float32` e só é aplicada ao modelo depois da validação dos 11 clientes.
+
+Qualquer falha invalida a soma parcial e restaura o modelo global bit a bit. O
+resultado `federated-round/v1` contém somente métricas agregadas, normas, hashes
+e proveniência segura. A orquestração retomável das 20 rodadas, pontos de
+restauração e auditorias após cada rodada permanecem etapas posteriores.
 
 ## 7. Defesas
 
