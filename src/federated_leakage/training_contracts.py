@@ -10,6 +10,7 @@ from typing import Any, Literal, Tuple
 
 from .configuration import ConfigurationError, load_yaml_mapping
 from .model_contracts import ModelProvenance
+from .reproducibility import EXPECTED_CUBLAS_WORKSPACE_CONFIG
 
 
 LOCAL_TRAINING_SCHEMA_VERSION = "local-training/v1"
@@ -174,6 +175,7 @@ def parse_local_training_spec(config: Mapping[str, Any]) -> LocalTrainingSpec:
 
     fixed_reproducibility = {
         "deterministic_algorithms": True,
+        "cuda_cublas_workspace_config": EXPECTED_CUBLAS_WORKSPACE_CONFIG,
         "dataloader_workers": 0,
     }
     fixed_federated = {

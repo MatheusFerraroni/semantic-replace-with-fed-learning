@@ -25,6 +25,9 @@ todos os parâmetros do Tucano 2 0.6B.
 - Manter inalterados o tokenizador, o vocabulário e os tokens especiais.
 - Usar 1.024 como comprimento máximo de treinamento, manter as amostras curtas e
   treinar todos os parâmetros em todas as condições federadas.
+- Antes de iniciar qualquer processo Python com CUDA determinístico, exportar
+  exatamente `CUBLAS_WORKSPACE_CONFIG=:4096:8`. A execução deve falhar sem
+  corrigir silenciosamente a variável quando ela estiver ausente ou divergente.
 - Manter 10 clientes-vítima e um slot auxiliar em cada cenário federado.
 - Distinguir cliente federado de participante sintético: cada cliente-vítima
   possui 20 participantes sintéticos, totalizando 200 participantes-vítima.
@@ -162,6 +165,11 @@ todos os parâmetros do Tucano 2 0.6B.
 - Salvar métricas separadamente dos pontos de restauração e evitar pontos de
   restauração ou intermediários grandes sem necessidade.
 - Preferir rotinas retomáveis para geração, treinamento e auditoria demorados.
+- Executar o piloto em uma única L40S pelo launcher
+  `scripts/run_pilot_l40s.sbatch`, sempre com modo explícito `preflight`,
+  `start` ou `resume`. Usar dependência Slurm `singleton`, manter os logs na
+  raiz ignorada do projeto e retomar manualmente após `TIMEOUT`; não configurar
+  requeue automático.
 - Não alterar pressupostos experimentais silenciosamente. Registrar mudanças no
   protocolo, README ou configuração da execução.
 - Relatar privacidade e utilidade juntas, inclusive resultados negativos e

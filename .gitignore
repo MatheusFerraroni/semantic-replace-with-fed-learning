@@ -46,3 +46,5 @@ utility_results.json
 
 # Local-only files
 .DS_Store
+/slurm-*.out
+/slurm-*.err

@@ -225,6 +225,9 @@ python -m federated_leakage.prepare_model \
 
 Os dois modos aceitam `--cache-dir` e `--device cpu|cuda|mps`. CPU é o padrão;
 um dispositivo solicitado e indisponível causa erro, sem fallback automático.
+Ao usar `--device cuda`, exporte antes do Python exatamente
+`CUBLAS_WORKSPACE_CONFIG=:4096:8`; a carga falha antes do download ou do modelo
+se o ambiente estiver ausente ou divergente.
 
 Um modelo refinado usa `kind: local_artifact` e o SHA-256 esperado na seção
 `model` de uma configuração própria. Copie
@@ -313,11 +316,21 @@ alvos é auditado em todos os 41 checkpoints; 1, 5 e 200 alvos são adicionados 
 B0 e na rodada 20 de cada trajetória. O total é de 44.000 conversas, 11.000
 passos locais e 69.710 gerações.
 
+Todo processo Python que use CUDA determinístico deve receber, antes de iniciar,
+o valor exato abaixo. O programa valida o contrato e falha se a variável estiver
+ausente ou divergente; ele não a define nem a corrige automaticamente.
+
+```bash
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+```
+
 Antes da execução longa, valide dados, modelo, tokenização e todos os orçamentos
 sem escrever saídas:
 
 ```bash
-HF_HUB_OFFLINE=1 python -m federated_leakage.run_pilot \
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python -m federated_leakage.run_pilot \
   --config configs/main-v1.yaml \
   --device cuda \
   --preflight-only
@@ -326,7 +339,9 @@ HF_HUB_OFFLINE=1 python -m federated_leakage.run_pilot \
 Para executar ou retomar:
 
 ```bash
-HF_HUB_OFFLINE=1 python -m federated_leakage.run_pilot \
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python -m federated_leakage.run_pilot \
   --config configs/main-v1.yaml \
   --device cuda
 ```
@@ -338,6 +353,40 @@ revalidados e a execução continua do último checkpoint confirmado. Não exist
 fallback de modelo, revisão, dtype ou dispositivo. Consulte
 [`docs/pilot-orchestrator.md`](docs/pilot-orchestrator.md) antes da execução
 científica completa.
+
+Em um cluster Slurm com a partição `l40s`, a interface operacional recomendada é
+o launcher versionado, sempre submetido da raiz do repositório e com um modo
+explícito. Execute somente um dos comandos conforme a etapa atual. Primeiro,
+submeta apenas o preflight:
+
+```bash
+sbatch scripts/run_pilot_l40s.sbatch preflight
+```
+
+Depois da revisão explícita do preflight, inicie uma execução nova:
+
+```bash
+sbatch scripts/run_pilot_l40s.sbatch start
+```
+
+Use `resume` somente quando o diretório da execução oficial já existir:
+
+```bash
+sbatch scripts/run_pilot_l40s.sbatch resume
+```
+
+`preflight` não escreve artefatos científicos. `start` usa `--fresh` e recusa
+um diretório `outputs/runs/pilot-seed-101-k01` existente. `resume` exige esse
+diretório, revalida seus artefatos e continua o mesmo `run_id`. O launcher
+reserva uma L40S, 8 CPUs, 64 GiB e 24 horas, usa `.venv/bin/python`, mantém o
+modelo offline e exporta o contrato do cuBLAS antes do Python. A dependência
+Slurm `singleton` impede jobs simultâneos com o mesmo nome; ainda assim, nunca
+submeta dois jobs para o mesmo `run_id`.
+
+Os logs `slurm-%x-%j.out` e `slurm-%x-%j.err` ficam na raiz e permanecem fora do
+Git. Não há requeue automático: após `TIMEOUT`, consulte `sacct` e os logs e
+submeta novamente o modo `resume`, que reutiliza o último checkpoint confirmado
+ou reproduz a rodada incompleta.
 
 ## Gerar um dataset para inspeção
 
@@ -373,6 +422,8 @@ testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
 preparado:
 
 ```bash
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+
 FEDERATED_RUN_MODEL_SMOKE=1 \
 python -m unittest tests.test_model_smoke -v
 

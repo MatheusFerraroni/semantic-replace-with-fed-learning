@@ -38,6 +38,10 @@ from .audit_prompts import (
 )
 from .model_contracts import EXPECTED_TOKEN_IDS, EXPECTED_VOCAB_SIZE, LoadedModelBundle
 from .model_fingerprint import fingerprint_model_parameters
+from .reproducibility import (
+    ReproducibilityEnvironmentError,
+    validate_cuda_reproducibility_environment,
+)
 from .synthetic_profiles.documents import (
     cpf_has_valid_checksum,
     rg_has_valid_reference_checksum,
@@ -558,10 +562,19 @@ def preflight_extraction_audit(
 ) -> None:
     """Confirma templates, fronteiras e orçamentos antes de gerar qualquer texto."""
 
-    _validate_context(context)
-    validate_extraction_audit_spec(spec)
     if not isinstance(bundle, LoadedModelBundle) or bundle.max_sequence_length != 1_024:
         raise ExtractionAuditError("bundle de modelo da auditoria é incompatível")
+    try:
+        device_name = getattr(bundle.provenance, "device", None)
+        validate_cuda_reproducibility_environment(device_name)
+    except ReproducibilityEnvironmentError as error:
+        raise ExtractionAuditError(str(error)) from error
+    except Exception as error:
+        raise ExtractionAuditError(
+            "proveniência do modelo da auditoria é incompatível"
+        ) from error
+    _validate_context(context)
+    validate_extraction_audit_spec(spec)
     for target in context.targets:
         values = dict(target.field_values)
         primary_prompt = CANONICAL_PREFIX_TEMPLATE.format(**values)
@@ -589,6 +602,10 @@ def preflight_extraction_audit(
 
 @contextmanager
 def _sampling_state(torch: Any, model: Any, device: Any, seed: int):
+    try:
+        validate_cuda_reproducibility_environment(device)
+    except ReproducibilityEnvironmentError as error:
+        raise ExtractionAuditError(str(error)) from error
     training = bool(model.training)
     cpu_state = torch.random.get_rng_state()
     deterministic = torch.are_deterministic_algorithms_enabled()
@@ -1043,6 +1060,17 @@ def run_extraction_audit(
 ) -> ExtractionAuditResult:
     """Executa ou retoma as 1.000 consultas e sela os artefatos do avaliador."""
 
+    if not isinstance(model_bundle, LoadedModelBundle):
+        raise ExtractionAuditError("bundle de modelo da auditoria é incompatível")
+    try:
+        device_name = getattr(model_bundle.provenance, "device", None)
+        validate_cuda_reproducibility_environment(device_name)
+    except ReproducibilityEnvironmentError as error:
+        raise ExtractionAuditError(str(error)) from error
+    except Exception as error:
+        raise ExtractionAuditError(
+            "proveniência do modelo da auditoria é incompatível"
+        ) from error
     context = _validate_context(context)
     checkpoint = _validate_checkpoint(checkpoint, context, model_bundle)
     preflight_extraction_audit(spec, context, model_bundle)

@@ -81,9 +81,15 @@ from .model_loading import (
     ModelLoadError,
     ModelProvenance,
     load_model_bundle,
+    load_model_spec_from_config,
     parse_model_spec,
     prepare_huggingface_model,
     validate_local_artifact,
+)
+from .reproducibility import (
+    EXPECTED_CUBLAS_WORKSPACE_CONFIG,
+    ReproducibilityEnvironmentError,
+    validate_cuda_reproducibility_environment,
 )
 from .model_fingerprint import fingerprint_model_parameters
 from .local_training import (
@@ -146,6 +152,7 @@ __all__ = [
     "DEFAULT_MODEL_CACHE",
     "EXPECTED_PARAMETER_COUNT",
     "EXPECTED_TOKENIZER_FINGERPRINT",
+    "EXPECTED_CUBLAS_WORKSPACE_CONFIG",
     "EXTRACTION_AUDIT_RECORD_SCHEMA_VERSION",
     "EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION",
     "EXTRACTION_AUDIT_SCHEMA_VERSION",
@@ -208,6 +215,7 @@ __all__ = [
     "load_federated_checkpoint",
     "load_fedavg_spec_from_config",
     "load_model_bundle",
+    "load_model_spec_from_config",
     "load_local_training_spec_from_config",
     "load_pilot_execution_spec_from_config",
     "mean_conversation_causal_loss",
@@ -239,4 +247,6 @@ __all__ = [
     "validate_local_artifact",
     "validate_tokenized_conversation",
     "restore_model_parameter_snapshot",
+    "ReproducibilityEnvironmentError",
+    "validate_cuda_reproducibility_environment",
 ]

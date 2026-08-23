@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .configuration import ConfigurationError, load_yaml_mapping
 from .model_artifact import (
     tokenizer_fingerprint as _tokenizer_fingerprint,
     validate_local_artifact as _validate_local_artifact,
@@ -46,6 +47,22 @@ from .model_contracts import (
     parse_model_spec,
     validate_model_spec,
 )
+from .reproducibility import (
+    ReproducibilityEnvironmentError,
+    validate_cuda_reproducibility_environment,
+)
+
+
+def load_model_spec_from_config(path: Path) -> ModelSpec:
+    """Carrega somente a seção pública `model` de um YAML."""
+
+    try:
+        config = load_yaml_mapping(Path(path))
+    except ConfigurationError as error:
+        raise ModelConfigurationError(str(error)) from error
+    if not isinstance(config.get("model"), dict):
+        raise ModelConfigurationError("configuração deve conter o objeto model")
+    return parse_model_spec(config["model"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +322,10 @@ def prepare_huggingface_model(
 ) -> LoadedModelBundle:
     """Baixa explicitamente o snapshot pinado e valida a carga offline."""
 
+    try:
+        validate_cuda_reproducibility_environment(device)
+    except ReproducibilityEnvironmentError as error:
+        raise ModelLoadError(str(error)) from error
     validated_spec = validate_model_spec(spec)
     if not isinstance(validated_spec, HuggingFaceModelSpec):
         raise ModelConfigurationError("prepare_huggingface_model exige origem pública")
@@ -345,6 +366,10 @@ def load_model_bundle(
 ) -> LoadedModelBundle:
     """Carrega somente de cache ou diretório local, sem permitir rede."""
 
+    try:
+        validate_cuda_reproducibility_environment(device)
+    except ReproducibilityEnvironmentError as error:
+        raise ModelLoadError(str(error)) from error
     validated_spec = validate_model_spec(spec)
     resolved_dependencies = dependencies or _load_model_dependencies()
     if isinstance(validated_spec, HuggingFaceModelSpec):
@@ -407,6 +432,7 @@ __all__ = [
     "ModelProvenance",
     "ModelSpec",
     "load_model_bundle",
+    "load_model_spec_from_config",
     "parse_model_spec",
     "prepare_huggingface_model",
     "validate_local_artifact",

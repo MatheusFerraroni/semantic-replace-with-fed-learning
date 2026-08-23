@@ -64,12 +64,15 @@ from .federated_round import (
 )
 from .model_contracts import DEFAULT_MODEL_CACHE, LoadedModelBundle
 from .model_fingerprint import fingerprint_model_parameters
-from .model_loading import load_model_bundle
+from .model_loading import load_model_bundle, load_model_spec_from_config
 from .model_updates import (
     capture_model_parameter_snapshot,
     restore_model_parameter_snapshot,
 )
-from .prepare_model import load_model_spec_from_config
+from .reproducibility import (
+    ReproducibilityEnvironmentError,
+    validate_cuda_reproducibility_environment,
+)
 from .synthetic_profiles import (
     AuxiliaryRound,
     AuxiliaryRoundGenerator,
@@ -869,6 +872,10 @@ def run_paired_pilot(
 ) -> PilotExecutionResult | PilotPreflightResult:
     """Executa B0 uma vez e as trajetórias F0/F1 sequencialmente."""
 
+    try:
+        validate_cuda_reproducibility_environment(device)
+    except ReproducibilityEnvironmentError as error:
+        raise PilotExecutionError(str(error)) from error
     resolved = validate_pilot_execution_spec(spec)
     if identity.experiment_seed != resolved.experiment_seed or (
         identity.config_sha256 != resolved.config_sha256

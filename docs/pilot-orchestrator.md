@@ -16,6 +16,20 @@ Isso totaliza 40 rodadas federadas, 44.000 conversas processadas, 11.000 passos
 locais e 69.710 gerações de auditoria. F2-F5, a varredura `k=1..10` e a campanha
 principal de 405 execuções não fazem parte deste comando.
 
+## Contrato de determinismo CUDA
+
+Antes de iniciar qualquer processo Python que use CUDA determinístico, o
+ambiente deve conter exatamente:
+
+```bash
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+```
+
+Esse valor integra a receita em `reproducibility.cuda_cublas_workspace_config`.
+O piloto, o treinamento local e o avaliador validam a variável antes de usar o
+modelo ou o RNG. Valor ausente ou divergente encerra a execução; o Python não
+define, substitui nem corrige o ambiente. CPU e MPS não exigem essa variável.
+
 ## Preflight
 
 O preflight completo ocorre antes de qualquer escrita. Ele gera em memória os
@@ -25,7 +39,9 @@ offline, tokeniza as vítimas uma vez e verifica os quatro orçamentos com o
 tokenizador real.
 
 ```bash
-HF_HUB_OFFLINE=1 python -m federated_leakage.run_pilot \
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python -m federated_leakage.run_pilot \
   --config configs/main-v1.yaml \
   --device cuda \
   --preflight-only
@@ -37,7 +53,9 @@ checkpoints. O dispositivo solicitado deve existir; não há fallback para CPU.
 ## Execução e retomada
 
 ```bash
-HF_HUB_OFFLINE=1 python -m federated_leakage.run_pilot \
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python -m federated_leakage.run_pilot \
   --config configs/main-v1.yaml \
   --device cuda
 ```
@@ -58,6 +76,66 @@ operacionais opcionais são:
 O terminal publica apenas progresso, contagens, métricas agregadas, hashes e o
 destino. Nomes, textos, tokens, valores protegidos, entidades, deltas e pesos não
 são impressos.
+
+## Execução Slurm em uma L40S
+
+O launcher `scripts/run_pilot_l40s.sbatch` é a interface versionada para o
+cluster. Ele deve ser submetido a partir da raiz do repositório, usa
+`.venv/bin/python` e fixa uma task, uma L40S, oito CPUs, 64 GiB de RAM e 24 horas.
+Duas GPUs não são usadas por um mesmo processo.
+
+O primeiro argumento é obrigatório e aceita somente:
+
+- `preflight`: executa a CLI com `--preflight-only` e não publica datasets,
+  checkpoints nem auditorias;
+- `start`: acrescenta `--fresh` e recusa o diretório da execução desse `run_id`
+  quando ele já existe;
+- `resume`: exige o diretório do mesmo `run_id`, não usa `--fresh`, revalida os
+  artefatos e continua do último checkpoint confirmado.
+
+Execute somente um modo conforme a etapa. Para validar sem escrever, submeta:
+
+```bash
+sbatch scripts/run_pilot_l40s.sbatch preflight
+```
+
+Depois da revisão explícita do preflight, inicie o piloto com:
+
+```bash
+sbatch scripts/run_pilot_l40s.sbatch start
+```
+
+Somente para uma execução oficial já existente, retome com:
+
+```bash
+sbatch scripts/run_pilot_l40s.sbatch resume
+```
+
+O launcher fixa a configuração `configs/main-v1.yaml`, o cache
+`artifacts/huggingface`, a raiz `outputs/` e o `run_id`
+`pilot-seed-101-k01`. Antes de chamar `srun`, ele exporta
+`CUBLAS_WORKSPACE_CONFIG=:4096:8`, `HF_HUB_OFFLINE=1`,
+`TRANSFORMERS_OFFLINE=1`, `TOKENIZERS_PARALLELISM=false` e
+`PYTHONUNBUFFERED=1`. Ele recusa execução fora do Slurm, sem GPU, com Python
+diferente de 3.12, dependências quebradas ou alterações rastreadas no worktree.
+
+A diretiva de dependência `singleton` serializa jobs com o mesmo nome. Ela não
+substitui a identidade científica: nunca devem existir duas submissões para o
+mesmo `run_id`. Os logs `slurm-%x-%j.out` e `slurm-%x-%j.err` são gravados na
+raiz do repositório, contêm apenas contexto técnico e progresso seguro e ficam
+fora do Git.
+
+Não há requeue automático. Se o Slurm encerrar o job com `TIMEOUT`, consulte o
+estado e os logs antes de retomar:
+
+```bash
+sacct -j <job_id> --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS
+sbatch scripts/run_pilot_l40s.sbatch resume
+```
+
+O modo `resume` reaproveita o último checkpoint confirmado. Resíduos de uma
+rodada não confirmada são revalidados e, se não puderem concluir a transação,
+essa rodada é reproduzida deterministicamente.
 
 ## Transação de uma rodada
 

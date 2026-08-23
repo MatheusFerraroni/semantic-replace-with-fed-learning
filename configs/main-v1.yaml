@@ -10,6 +10,7 @@ model:
 reproducibility:
   seeds: [11, 22, 33, 44, 55]
   deterministic_algorithms: true
+  cuda_cublas_workspace_config: ":4096:8"
   dataloader_workers: 0
   client_order:
     - victim-01

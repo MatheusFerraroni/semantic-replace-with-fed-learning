@@ -322,6 +322,14 @@ rodada. Cenário, apresentação e `k` não participam, preservando o pareamento
 identidade bit a bit é exigida apenas quando dispositivo, versões e ambiente são
 os mesmos.
 
+Em CUDA, o ambiente reprodutível inclui obrigatoriamente
+`CUBLAS_WORKSPACE_CONFIG=:4096:8`, conforme
+`reproducibility.cuda_cublas_workspace_config`. A variável deve existir com esse
+valor exato antes do processo Python; treinamento, avaliação e piloto falham
+antes de usar modelo ou RNG se ela estiver ausente ou divergente. A aplicação
+não altera o ambiente nem aplica fallback. Esse requisito não se aplica a CPU ou
+MPS.
+
 O otimizador adversário é reiniciado a cada rodada. O estado do gerador auxiliar
 necessário para retomada é persistido ou derivado de forma inequívoca. Repetir
 uma rodada após falha deve recriar exatamente as mesmas amostras, não avançar
@@ -626,6 +634,20 @@ seleção de 20 permanece balanceada em dois alvos por cliente. Isso totaliza
 humana; a execução não altera a configuração automaticamente. A seed de
 desenvolvimento não entra nos resultados.
 
+No cluster Slurm de referência, o piloto usa um único processo em uma L40S pelo
+launcher `scripts/run_pilot_l40s.sbatch`, submetido da raiz do repositório com
+modo obrigatório `preflight`, `start` ou `resume`. O launcher fixa recursos,
+configuração, cache, saída e `run_id`, exporta o ambiente CUDA determinístico e
+offline antes do Python e serializa submissões pela dependência `singleton`.
+`start` usa `--fresh` e recusa o diretório desse `run_id` se ele já existir;
+`resume` exige a execução existente e mantém o mesmo `run_id` sem `--fresh`.
+
+Os logs `slurm-%x-%j.out` e `slurm-%x-%j.err` ficam na raiz ignorada pelo Git.
+Não há requeue automático. Depois de `TIMEOUT`, o operador verifica `sacct` e os
+logs e submete manualmente `resume`; o orquestrador reutiliza o último checkpoint
+confirmado ou reproduz deterministicamente a rodada incompleta. Duas GPUs e
+execuções simultâneas para o mesmo `run_id` são proibidas no piloto.
+
 ## 9. Utilidade e estatística
 
 Utilidade usa 100 perfis sintéticos exclusivos de avaliação e mede perplexidade,
@@ -686,6 +708,8 @@ A execução falha se:
 - F4 e F5 não usarem o mesmo mapa de substituições;
 - uma extração direcionada for contada sem corresponder ao nome consultado;
 - configuração, modelo, tokenizador ou comprimento divergirem dos manifestos;
+- um processo CUDA determinístico iniciar sem
+  `CUBLAS_WORKSPACE_CONFIG=:4096:8` exatamente;
 - o baseline não estiver no cache pinado durante uma carga experimental offline;
 - um artefato de modelo contiver links, arquivos não declarados, hashes
   divergentes, pesos não `safetensors`, arquitetura ou tokenizador incompatível.

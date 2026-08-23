@@ -23,6 +23,10 @@ from .model_loading import (
     ModelLoadError,
 )
 from .pilot_execution import run_paired_pilot
+from .reproducibility import (
+    ReproducibilityEnvironmentError,
+    validate_cuda_reproducibility_environment,
+)
 
 
 DEFAULT_OUTPUT_ROOT = Path("outputs")
@@ -129,6 +133,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.preflight_only and arguments.fresh:
         parser.error("--fresh não se aplica a --preflight-only")
     try:
+        validate_cuda_reproducibility_environment(arguments.device)
         spec = load_pilot_execution_spec_from_config(arguments.config)
         identity = build_pilot_run_identity(spec, run_id=arguments.run_id)
         result = run_paired_pilot(
@@ -150,6 +155,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ModelDependencyError,
         ModelLoadError,
         PilotExecutionError,
+        ReproducibilityEnvironmentError,
     ) as error:
         print(f"erro: {error}", file=sys.stderr)
         return 1

@@ -14,6 +14,10 @@ from .model_updates import (
     _validate_snapshot,
     restore_model_parameter_snapshot,
 )
+from .reproducibility import (
+    ReproducibilityEnvironmentError,
+    validate_cuda_reproducibility_environment,
+)
 from .tokenization import (
     LABEL_IGNORE_INDEX,
     TokenizedBatch,
@@ -206,6 +210,10 @@ def _training_seed(seed: int, client_id: str, round_id: int) -> Tuple[int, str]:
 
 def _configure_determinism(torch: Any, seed: int, device_type: str) -> None:
     try:
+        validate_cuda_reproducibility_environment(device_type)
+    except ReproducibilityEnvironmentError as error:
+        raise LocalTrainingError(str(error)) from error
+    try:
         torch.manual_seed(seed)
         if device_type == "cuda":
             torch.cuda.manual_seed_all(seed)
@@ -331,6 +339,17 @@ def train_local_client(
 ) -> LocalTrainingResult:
     """Treina, em ordem, as 100 conversas de um único cliente e uma rodada."""
 
+    if not isinstance(model_bundle, LoadedModelBundle):
+        raise LocalTrainingError("bundle de modelo do treinamento local é incompatível")
+    try:
+        device_name = getattr(model_bundle.provenance, "device", None)
+        validate_cuda_reproducibility_environment(device_name)
+    except ReproducibilityEnvironmentError as error:
+        raise LocalTrainingError(str(error)) from error
+    except Exception as error:
+        raise LocalTrainingError(
+            "proveniência do modelo do treinamento local é incompatível"
+        ) from error
     torch, _ = _load_torch()
     validated_spec = validate_local_training_spec(spec)
     resolved, client_id = _validate_samples(samples, validated_spec, role, round_id)

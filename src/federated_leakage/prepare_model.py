@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .configuration import ConfigurationError, load_yaml_mapping
-
 from .model_loading import (
     DEFAULT_MODEL_CACHE,
     HuggingFaceModelSpec,
@@ -16,23 +14,10 @@ from .model_loading import (
     ModelConfigurationError,
     ModelDependencyError,
     ModelLoadError,
-    ModelSpec,
     load_model_bundle,
-    parse_model_spec,
+    load_model_spec_from_config,
     prepare_huggingface_model,
 )
-
-
-def load_model_spec_from_config(path: Path) -> ModelSpec:
-    """Carrega somente a seção pública `model` de um YAML."""
-
-    try:
-        config = load_yaml_mapping(Path(path))
-    except ConfigurationError as error:
-        raise ModelConfigurationError(str(error)) from error
-    if not isinstance(config.get("model"), dict):
-        raise ModelConfigurationError("configuração deve conter o objeto model")
-    return parse_model_spec(config["model"])
 
 
 def _print_safe_summary(bundle) -> None:
