@@ -335,10 +335,13 @@ necessário para retomada é persistido ou derivado de forma inequívoca. Repeti
 uma rodada após falha deve recriar exatamente as mesmas amostras, não avançar
 para dados novos.
 
-F0/F1, F2/F3 e F4/F5 mantêm modelo inicial, vítimas, agenda auxiliar por rodada,
-valores, ordem, passos locais, coeficiente de agregação e servidor. A diferença
-de cada par é o efeito composto da apresentação adversária e da perda somente na
-continuação.
+F0/F1, F2/F3 e F4/F5 mantêm o mesmo baseline no início das trajetórias,
+vítimas, agenda auxiliar por rodada, valores, ordem, passos locais, coeficiente
+de agregação e servidor. Na rodada 1, os estados iniciais dos dois braços são o
+baseline. Da rodada 2 em diante, cada braço continua de seu próprio modelo final
+anterior; os estados globais correntes não precisam permanecer iguais depois
+que as trajetórias divergem. A diferença de cada par é o efeito composto da
+apresentação adversária e da perda somente na continuação.
 
 O adversário recebe o modelo global de cada rodada, mas a atualização da rodada
 `r` não altera o treinamento local das vítimas nessa mesma rodada. Seu efeito
@@ -435,8 +438,10 @@ Qualquer falha invalida a soma parcial e restaura o modelo global bit a bit. O
 resultado `federated-round/v1` contém somente métricas agregadas, normas, hashes
 e proveniência segura. O piloto B0/F0/F1 conecta esse núcleo a uma orquestração
 retomável de 20 rodadas por trajetória, checkpoints `safetensors` e auditoria
-automática após cada rodada. A campanha principal, F2-F5 e a varredura completa
-de `k` permanecem etapas posteriores.
+automática após cada rodada. A validação do piloto exige o baseline comum na
+rodada 1 e continuidade interna `initial[r] == final[r-1]` separadamente em F0 e
+F1 nas rodadas seguintes. A campanha principal, F2-F5 e a varredura completa de
+`k` permanecem etapas posteriores.
 
 ## 7. Defesas
 

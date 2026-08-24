@@ -64,7 +64,10 @@ O `run_id` padrão é `pilot-seed-101-k01`. Uma segunda chamada compatível reto
 o último estado confirmado; se `completed.json` já existir, todos os artefatos
 necessários são relidos e revalidados sem repetir treinamento ou gerações.
 Ambas as trajetórias registram o fingerprint do mesmo baseline e o hash agregado
-das quatro auditorias B0 compartilhadas.
+das quatro auditorias B0 compartilhadas. Na rodada 1, F0 e F1 partem desse mesmo
+baseline. A partir da rodada 2, cada cenário parte exclusivamente de seu próprio
+modelo final anterior; a validação pareada compara dados, pesos, seeds, agenda e
+proveniência, mas não exige que os modelos correntes dos dois braços coincidam.
 `--fresh` recusa qualquer diretório de execução existente. Os argumentos
 operacionais opcionais são:
 
@@ -149,10 +152,14 @@ imediatamente pelo acumulador FedAvg. Uma rodada só é confirmada depois de:
 4. publicação do commit da rodada e atualização de `state.json`.
 
 Na F1, o resultado FedAvg e as auditorias também são comparados com a mesma
-rodada F0 antes da confirmação. Uma falha anterior ao commit restaura o snapshot
-da rodada. Um checkpoint completo deixado antes do commit pode concluir a
-transação após revalidação; qualquer candidato incompatível é descartado e a
-rodada é reproduzida.
+rodada F0 antes da confirmação. A rodada 1 deve começar do baseline compartilhado;
+nas demais, o estado inicial de cada braço deve ser exatamente o estado final da
+rodada anterior daquele cenário. Essa continuidade é revalidada ao carregar um
+prefixo confirmado e ao recuperar um checkpoint. Uma falha anterior ao commit
+restaura o snapshot da rodada. Um checkpoint completo deixado antes do commit
+pode concluir a transação após revalidação; qualquer candidato incompatível é
+descartado e a rodada é reproduzida. Auditorias já concluídas só são reutilizadas
+quando o fingerprint do modelo e todos os metadados esperados coincidem.
 
 Os checkpoints permanentes são as rodadas 1, 10 e 20. Nas demais rodadas existe
 somente um checkpoint móvel de retomada. Cada checkpoint contém o modelo BF16 em

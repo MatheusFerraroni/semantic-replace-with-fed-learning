@@ -27,6 +27,7 @@ from federated_leakage.federated_round import (
     prepare_victim_training_inputs,
     run_non_private_federated_round,
     validate_paired_federated_round_results,
+    validate_paired_federated_trajectory_round_results,
 )
 from federated_leakage.local_training import (
     train_local_client as actual_train_local_client,
@@ -540,6 +541,63 @@ class FederatedRoundIntegrationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(FedAvgError, "pareamento"):
             validate_paired_federated_round_results(base, adversarial)
+
+        sequential_benign = dataclasses.replace(
+            base,
+            round_id=2,
+            initial_model_sha256="8" * 64,
+        )
+        sequential_adversarial = dataclasses.replace(
+            adversarial,
+            round_id=2,
+            initial_model_sha256="9" * 64,
+        )
+        validate_paired_federated_trajectory_round_results(
+            sequential_benign,
+            sequential_adversarial,
+            expected_benign_initial_model_sha256="8" * 64,
+            expected_adversarial_initial_model_sha256="9" * 64,
+        )
+        with self.assertRaisesRegex(FedAvgError, "continuidade F1 da rodada 2") as error:
+            validate_paired_federated_trajectory_round_results(
+                sequential_benign,
+                sequential_adversarial,
+                expected_benign_initial_model_sha256="8" * 64,
+                expected_adversarial_initial_model_sha256="0" * 64,
+            )
+        self.assertNotIn("0" * 64, str(error.exception))
+
+        for changed_field, changed_value in (
+            ("experiment_seed", 12),
+            ("auxiliary_weight_units", 2),
+            ("auxiliary_schedule_sha256", "a" * 64),
+        ):
+            with self.subTest(changed_field=changed_field), self.assertRaisesRegex(
+                FedAvgError,
+                changed_field,
+            ):
+                validate_paired_federated_trajectory_round_results(
+                    sequential_benign,
+                    dataclasses.replace(
+                        sequential_adversarial,
+                        **{changed_field: changed_value},
+                    ),
+                    expected_benign_initial_model_sha256="8" * 64,
+                    expected_adversarial_initial_model_sha256="9" * 64,
+                )
+
+        with self.assertRaisesRegex(FedAvgError, "não diferem"):
+            validate_paired_federated_trajectory_round_results(
+                sequential_benign,
+                dataclasses.replace(
+                    sequential_adversarial,
+                    auxiliary_presentation_sha256=(
+                        sequential_benign.auxiliary_presentation_sha256
+                    ),
+                ),
+                expected_benign_initial_model_sha256="8" * 64,
+                expected_adversarial_initial_model_sha256="9" * 64,
+            )
 
     def test_preparation_and_round_failures_hide_conversation_content(self):
         tampered = dataclasses.replace(

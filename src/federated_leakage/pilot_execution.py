@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Tuple
 
 from .aggregation_contracts import (
+    FedAvgError,
     FedAvgRoundResult,
     FedAvgSpec,
     load_fedavg_spec_from_config,
@@ -17,6 +18,7 @@ from .aggregation_contracts import (
 from .audit_contracts import (
     AuditCheckpoint,
     AuditSpec,
+    ExtractionAuditError,
     ExtractionAuditResult,
     TrustedEvaluatorContext,
     load_extraction_audit_spec_from_config,
@@ -60,7 +62,8 @@ from .federated_round import (
     prepare_auxiliary_training_input,
     prepare_victim_training_inputs,
     run_non_private_federated_round,
-    validate_paired_federated_round_results,
+    validate_federated_round_result,
+    validate_paired_federated_trajectory_round_results,
 )
 from .model_contracts import DEFAULT_MODEL_CACHE, LoadedModelBundle
 from .model_fingerprint import fingerprint_model_parameters
@@ -371,6 +374,7 @@ def _load_committed_trajectory(
     completed_round: int,
     audit_spec: AuditSpec,
     contexts: Mapping[int, TrustedEvaluatorContext],
+    baseline_model_sha256: str,
 ) -> tuple[list[FedAvgRoundResult], list[ExtractionAuditResult]]:
     rounds: list[FedAvgRoundResult] = []
     audits: list[ExtractionAuditResult] = []
@@ -380,12 +384,62 @@ def _load_committed_trajectory(
             scenario,
             round_id,
         )
+        expected_initial = (
+            baseline_model_sha256
+            if not rounds
+            else rounds[-1].final_model_sha256
+        )
+        _validate_trajectory_round_continuity(
+            result,
+            scenario=scenario,
+            round_id=round_id,
+            expected_initial_model_sha256=expected_initial,
+        )
         rounds.append(result)
         audits.extend(
             _revalidate_completed_audit(paths, audit_spec, contexts, audit)
             for audit in round_audits
         )
     return rounds, audits
+
+
+def _validate_trajectory_round_continuity(
+    result: FedAvgRoundResult,
+    *,
+    scenario: str,
+    round_id: int,
+    expected_initial_model_sha256: str,
+) -> None:
+    try:
+        resolved = validate_federated_round_result(result)
+    except Exception as error:
+        raise PilotExecutionError(
+            f"resultado {scenario} da rodada {round_id} é incompatível"
+        ) from error
+    if resolved.scenario != scenario or resolved.round_id != round_id:
+        raise PilotExecutionError(
+            f"identidade {scenario} da rodada {round_id} diverge"
+        )
+    if resolved.initial_model_sha256 != expected_initial_model_sha256:
+        raise PilotExecutionError(
+            f"continuidade {scenario} da rodada {round_id} diverge"
+        )
+
+
+def _validate_trajectory_sequence(
+    scenario: str,
+    baseline_model_sha256: str,
+    rounds: Sequence[FedAvgRoundResult],
+) -> None:
+    expected_initial = baseline_model_sha256
+    for expected_round, result in enumerate(rounds, start=1):
+        _validate_trajectory_round_continuity(
+            result,
+            scenario=scenario,
+            round_id=expected_round,
+            expected_initial_model_sha256=expected_initial,
+        )
+        expected_initial = result.final_model_sha256
 
 
 def _trajectory_result(
@@ -399,6 +453,7 @@ def _trajectory_result(
     audit_tuple = tuple(audits)
     if len(round_tuple) != 20 or not round_tuple:
         raise PilotExecutionError("trajetória não possui vinte rodadas")
+    _validate_trajectory_sequence(scenario, baseline_model_sha256, round_tuple)
     payload = {
         "scenario": scenario,
         "baseline_audit_sha256": baseline_audit_sha256,
@@ -443,6 +498,8 @@ def validate_paired_federated_trajectory_results(
         or len(adversarial.round_results) != 20
     ):
         raise PilotExecutionError("trajetórias pareadas são incompatíveis")
+    expected_benign_initial = benign.baseline_model_sha256
+    expected_adversarial_initial = adversarial.baseline_model_sha256
     for expected_round, (first, second) in enumerate(
         zip(benign.round_results, adversarial.round_results),
         start=1,
@@ -450,9 +507,22 @@ def validate_paired_federated_trajectory_results(
         if first.round_id != expected_round or second.round_id != expected_round:
             raise PilotExecutionError("trajetórias pareadas estão fora de ordem")
         try:
-            validate_paired_federated_round_results(first, second)
+            validate_paired_federated_trajectory_round_results(
+                first,
+                second,
+                expected_benign_initial_model_sha256=expected_benign_initial,
+                expected_adversarial_initial_model_sha256=(
+                    expected_adversarial_initial
+                ),
+            )
+        except FedAvgError as error:
+            raise PilotExecutionError(str(error)) from error
         except Exception as error:
-            raise PilotExecutionError("rodada das trajetórias pareadas diverge") from error
+            raise PilotExecutionError(
+                f"pareamento das trajetórias diverge na rodada {expected_round}"
+            ) from error
+        expected_benign_initial = first.final_model_sha256
+        expected_adversarial_initial = second.final_model_sha256
     for trajectory in (benign, adversarial):
         expected = _trajectory_result(
             trajectory.scenario,
@@ -495,10 +565,21 @@ def _validate_and_commit_pair(
     adversarial: FedAvgRoundResult,
     adversarial_audits: Sequence[ExtractionAuditResult],
     *,
+    expected_benign_initial_model_sha256: str,
+    expected_adversarial_initial_model_sha256: str,
     commit: bool = True,
 ) -> None:
     try:
-        validate_paired_federated_round_results(benign, adversarial)
+        validate_paired_federated_trajectory_round_results(
+            benign,
+            adversarial,
+            expected_benign_initial_model_sha256=(
+                expected_benign_initial_model_sha256
+            ),
+            expected_adversarial_initial_model_sha256=(
+                expected_adversarial_initial_model_sha256
+            ),
+        )
         benign_by_count = {result.target_count: result for result in benign_audits}
         adversarial_by_count = {
             result.target_count: result for result in adversarial_audits
@@ -515,8 +596,12 @@ def _validate_and_commit_pair(
             commit_paired_round(paths, benign, adversarial, pairs)
     except PilotExecutionError:
         raise
+    except (FedAvgError, ExtractionAuditError) as error:
+        raise PilotExecutionError(str(error)) from error
     except Exception as error:
-        raise PilotExecutionError("validação pareada da rodada falhou") from error
+        raise PilotExecutionError(
+            f"validação pareada da rodada {benign.round_id} falhou"
+        ) from error
 
 
 def _restore_committed_checkpoint(
@@ -596,6 +681,7 @@ def run_non_private_trajectory(
         state.completed_round,
         audit_spec,
         evaluator_contexts,
+        baseline_model_sha256,
     )
     presentation = "benign" if scenario == "F0" else "adversarial"
     generator = AuxiliaryRoundGenerator(
@@ -603,6 +689,11 @@ def run_non_private_trajectory(
         schedule_id=resolved.schedule_id,
     )
     for round_id in range(state.completed_round + 1, resolved.rounds + 1):
+        expected_initial_model_sha256 = (
+            baseline_model_sha256
+            if not round_results
+            else round_results[-1].final_model_sha256
+        )
         generated_round = generator.generate(round_id, presentation=presentation)
         round_data = _ensure_auxiliary_artifact(paths, generated_round)
         auxiliary_manifest = build_round_manifest(round_data)
@@ -635,6 +726,12 @@ def run_non_private_trajectory(
                 recovered_round = round_result_from_safe_payload(
                     recovered.round_result_payload
                 )
+                _validate_trajectory_round_continuity(
+                    recovered_round,
+                    scenario=scenario,
+                    round_id=round_id,
+                    expected_initial_model_sha256=expected_initial_model_sha256,
+                )
                 targets = (1, 5, 20, 200) if round_id == 20 else (20,)
                 recovered_audits = tuple(
                     _revalidate_completed_audit(
@@ -664,12 +761,25 @@ def run_non_private_trajectory(
                     benign, benign_audits, _, _ = read_committed_round(
                         paths, "F0", round_id
                     )
+                    expected_benign_initial_model_sha256 = (
+                        baseline_model_sha256
+                        if round_id == 1
+                        else read_committed_round(paths, "F0", round_id - 1)[
+                            0
+                        ].final_model_sha256
+                    )
                     _validate_and_commit_pair(
                         paths,
                         benign,
                         benign_audits,
                         recovered_round,
                         recovered_audits,
+                        expected_benign_initial_model_sha256=(
+                            expected_benign_initial_model_sha256
+                        ),
+                        expected_adversarial_initial_model_sha256=(
+                            expected_initial_model_sha256
+                        ),
                         commit=False,
                     )
                 state = commit_trajectory_round(
@@ -731,6 +841,12 @@ def run_non_private_trajectory(
                 auxiliary_weight_units=resolved.auxiliary_weight_units,
                 initial_snapshot=round_snapshot,
             )
+            _validate_trajectory_round_continuity(
+                result,
+                scenario=scenario,
+                round_id=round_id,
+                expected_initial_model_sha256=expected_initial_model_sha256,
+            )
             target_counts = (1, 5, 20, 200) if round_id == 20 else (20,)
             audits = _run_audits(
                 spec=audit_spec,
@@ -746,12 +862,25 @@ def run_non_private_trajectory(
                 benign, benign_audits, _, _ = read_committed_round(
                     paths, "F0", round_id
                 )
+                expected_benign_initial_model_sha256 = (
+                    baseline_model_sha256
+                    if round_id == 1
+                    else read_committed_round(paths, "F0", round_id - 1)[
+                        0
+                    ].final_model_sha256
+                )
                 _validate_and_commit_pair(
                     paths,
                     benign,
                     benign_audits,
                     result,
                     audits,
+                    expected_benign_initial_model_sha256=(
+                        expected_benign_initial_model_sha256
+                    ),
+                    expected_adversarial_initial_model_sha256=(
+                        expected_initial_model_sha256
+                    ),
                     commit=False,
                 )
             checkpoint_metadata = build_federated_checkpoint_metadata(
@@ -787,6 +916,12 @@ def run_non_private_trajectory(
                     benign_audits,
                     result,
                     audits,
+                    expected_benign_initial_model_sha256=(
+                        expected_benign_initial_model_sha256
+                    ),
+                    expected_adversarial_initial_model_sha256=(
+                        expected_initial_model_sha256
+                    ),
                 )
             remove_obsolete_resume_checkpoints(
                 paths,
@@ -1007,6 +1142,8 @@ def run_paired_pilot(
         progress_callback=progress_callback,
     )
     validate_paired_federated_trajectory_results(f0, f1)
+    expected_benign_initial_model_sha256 = baseline_model_sha256
+    expected_adversarial_initial_model_sha256 = baseline_model_sha256
     for round_id in range(1, resolved.rounds + 1):
         benign, benign_audits, _, _ = read_committed_round(paths, "F0", round_id)
         adversarial, adversarial_audits, _, _ = read_committed_round(
@@ -1018,7 +1155,15 @@ def run_paired_pilot(
             benign_audits,
             adversarial,
             adversarial_audits,
+            expected_benign_initial_model_sha256=(
+                expected_benign_initial_model_sha256
+            ),
+            expected_adversarial_initial_model_sha256=(
+                expected_adversarial_initial_model_sha256
+            ),
         )
+        expected_benign_initial_model_sha256 = benign.final_model_sha256
+        expected_adversarial_initial_model_sha256 = adversarial.final_model_sha256
     paired_sha = _canonical_hash(
         {
             "f0": f0.result_sha256,

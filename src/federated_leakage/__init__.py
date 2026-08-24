@@ -39,6 +39,7 @@ from .federated_round import (
     prepare_victim_training_inputs,
     run_non_private_federated_round,
     validate_paired_federated_round_results,
+    validate_paired_federated_trajectory_round_results,
     validate_federated_round_result,
 )
 from .execution_contracts import (
@@ -238,6 +239,7 @@ __all__ = [
     "tokenize_training_conversations",
     "train_local_client",
     "validate_paired_federated_round_results",
+    "validate_paired_federated_trajectory_round_results",
     "validate_paired_federated_trajectory_results",
     "validate_federated_round_result",
     "validate_paired_extraction_audit_results",

@@ -67,9 +67,13 @@ todos os parâmetros do Tucano 2 0.6B.
   complementar.
 - Usar cliente auxiliar benigno em F0, F2 e F4 e a variante adversária pareada em
   F1, F3 e F5.
-- Parear cada comparação benigna/adversária pelo modelo inicial, dados das
-  vítimas, especificação e agenda auxiliar por rodada, valores, ordem das
-  amostras, coeficiente FedAvg e passos locais.
+- Parear cada comparação benigna/adversária pelo mesmo baseline no início das
+  duas trajetórias, dados das vítimas, especificação e agenda auxiliar por
+  rodada, valores, ordem das amostras, coeficiente FedAvg e passos locais. Na
+  rodada 1, os dois estados iniciais devem coincidir com o baseline. Da rodada
+  2 em diante, cada trajetória começa de seu próprio estado final anterior;
+  não exigir igualdade entre os estados globais correntes de braços que já
+  divergiram.
 - Fazer cada variante auxiliar reconstruir localmente a mesma agenda
   determinística da comparação, sem compartilhar arquivos ou estado privado.
 - Fazer o cliente adversário gerar localmente dados auxiliares sintéticos novos
@@ -145,6 +149,9 @@ todos os parâmetros do Tucano 2 0.6B.
   de F1 e 20 rodadas por trajetória. Auditar 20 alvos em B0 e após cada rodada;
   auditar também 1, 5 e 200 alvos em B0 e na rodada 20 de F0/F1. Não congelar a
   receita principal sem revisão humana explícita.
+- Ao retomar o piloto, validar a continuidade de cada prefixo confirmado e de
+  cada checkpoint: rodada 1 parte do baseline compartilhado e toda rodada
+  posterior parte do estado final anterior do mesmo cenário.
 - Manter checkpoints federados permanentes nas rodadas 1, 10 e 20 e somente um
   checkpoint móvel nas demais. Persistir pesos exclusivamente em `safetensors`,
   sem otimizadores, deltas, tokens, textos ou registros protegidos.

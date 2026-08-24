@@ -81,7 +81,12 @@ def _bundle(value=0.25):
     )
 
 
-def _round_result(scenario="F0", round_id=1, final_hash="f" * 64):
+def _round_result(
+    scenario="F0",
+    round_id=1,
+    final_hash="f" * 64,
+    initial_hash=None,
+):
     return FedAvgRoundResult(
         scenario=scenario,
         experiment_seed=101,
@@ -108,7 +113,11 @@ def _round_result(scenario="F0", round_id=1, final_hash="f" * 64):
         auxiliary_values_sha256="7" * 64,
         auxiliary_presentation_sha256=("8" if scenario == "F0" else "9") * 64,
         auxiliary_batch_sha256=("a" if scenario == "F0" else "b") * 64,
-        initial_model_sha256=f"{round_id - 1:064x}"[-64:],
+        initial_model_sha256=(
+            initial_hash
+            if initial_hash is not None
+            else f"{round_id - 1:064x}"[-64:]
+        ),
         aggregate_update_sha256=("c" if scenario == "F0" else "d") * 64,
         final_model_sha256=final_hash,
         model_provenance=_provenance(),
@@ -390,36 +399,60 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
     def test_runs_full_simulated_pilot_and_revalidates_completed_run(self):
         spec = load_pilot_execution_spec_from_config(Path("configs/main-v1.yaml"))
         identity = build_pilot_run_identity(spec, run_id="test-pilot")
-        bundles = [_bundle(), _bundle(), _bundle(), _bundle(), _bundle()]
         load_count = 0
 
         def loader():
             nonlocal load_count
-            bundle = bundles[load_count]
             load_count += 1
-            return bundle
+            return _bundle()
 
         baseline_hash = "0" * 64
         round_calls = []
         audit_calls = []
+        audit_invocations = []
+        audit_cache = {}
+        fail_f1_round_two = True
 
         def fake_round(*args, scenario, round_id, **kwargs):
             round_calls.append((scenario, round_id))
             final = ("a" if scenario == "F0" else "b") + f"{round_id:063x}"
-            return _round_result(scenario, round_id, final[-64:])
+            initial = (
+                baseline_hash
+                if round_id == 1
+                else ("a" if scenario == "F0" else "b")
+                + f"{round_id - 1:063x}"
+            )
+            return _round_result(
+                scenario,
+                round_id,
+                final[-64:],
+                initial[-64:],
+            )
 
         def fake_audit(spec_arg, context, checkpoint, bundle, **kwargs):
-            audit_calls.append(
-                (checkpoint.scenario, checkpoint.round_id, context.target_budget.target_count)
+            key = (
+                checkpoint.scenario,
+                checkpoint.round_id,
+                context.target_budget.target_count,
             )
-            return _audit_result(
-                scenario=checkpoint.scenario,
-                round_id=checkpoint.round_id,
-                target_count=context.target_budget.target_count,
-                model_hash=checkpoint.expected_model_sha256,
-            )
+            audit_invocations.append(key)
+            if key not in audit_cache:
+                audit_calls.append(key)
+                audit_cache[key] = _audit_result(
+                    scenario=checkpoint.scenario,
+                    round_id=checkpoint.round_id,
+                    target_count=context.target_budget.target_count,
+                    model_hash=checkpoint.expected_model_sha256,
+                )
+            return audit_cache[key]
 
         def fake_save(path, bundle, metadata, round_result):
+            if (
+                fail_f1_round_two
+                and round_result.scenario == "F1"
+                and round_result.round_id == 2
+            ):
+                raise OSError("falha-injetada")
             path.mkdir(parents=True)
             return LoadedFederatedCheckpoint(
                 metadata=metadata,
@@ -431,7 +464,18 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             scenario = kwargs["expected_scenario"]
             round_id = kwargs["expected_round_id"]
             final = ("a" if scenario == "F0" else "b") + f"{round_id:063x}"
-            result = _round_result(scenario, round_id, final[-64:])
+            initial = (
+                baseline_hash
+                if round_id == 1
+                else ("a" if scenario == "F0" else "b")
+                + f"{round_id - 1:063x}"
+            )
+            result = _round_result(
+                scenario,
+                round_id,
+                final[-64:],
+                initial[-64:],
+            )
             targets = (1, 5, 20, 200) if round_id == 20 else (20,)
             audits = tuple(
                 _audit_result(
@@ -488,33 +532,35 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             "federated_leakage.pilot_execution._revalidate_completed_audit",
             side_effect=lambda paths, spec, contexts, result: result,
         ):
-            failed_identity = build_pilot_run_identity(
-                spec,
-                run_id="failed-pilot",
-            )
-            with mock.patch(
-                "federated_leakage.pilot_execution.save_federated_checkpoint",
-                side_effect=OSError("falha-injetada"),
-            ), self.assertRaises(PilotExecutionError):
+            with self.assertRaises(PilotExecutionError):
                 run_paired_pilot(
                     spec,
-                    failed_identity,
+                    identity,
                     config_path=Path("configs/main-v1.yaml"),
                     output_root=Path(directory),
                     device="cpu",
                     model_loader=loader,
                 )
             self.assertFalse(
-                (Path(directory) / "runs/failed-pilot/completed.json").exists()
+                (Path(directory) / "runs/test-pilot/completed.json").exists()
             )
-            self.assertFalse(
+            f0_state = json.loads(
                 (
                     Path(directory)
-                    / "runs/failed-pilot/trajectories/F0-k01/state.json"
-                ).exists()
+                    / "runs/test-pilot/trajectories/F0-k01/state.json"
+                ).read_text(encoding="utf-8")
             )
-            round_calls.clear()
-            audit_calls.clear()
+            f1_state = json.loads(
+                (
+                    Path(directory)
+                    / "runs/test-pilot/trajectories/F1-k01/state.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(f0_state["completed_round"], 20)
+            self.assertEqual(f1_state["completed_round"], 1)
+            self.assertIn(("F1", 2, 20), audit_cache)
+
+            fail_f1_round_two = False
 
             result = run_paired_pilot(
                 spec,
@@ -528,9 +574,19 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             self.assertEqual(result.total_conversation_count, 44_000)
             self.assertEqual(result.total_optimizer_steps, 11_000)
             self.assertEqual(result.total_audit_generations, 69_710)
-            self.assertEqual(len(round_calls), 40)
+            self.assertEqual(len(round_calls), 41)
+            self.assertEqual(round_calls.count(("F1", 2)), 2)
+            self.assertEqual(round_calls.count(("F0", 1)), 1)
+            self.assertEqual(round_calls.count(("F0", 20)), 1)
+            self.assertEqual(round_calls.count(("F1", 1)), 1)
             self.assertEqual(len(audit_calls), 50)
+            self.assertEqual(audit_calls.count(("F1", 2, 20)), 1)
+            self.assertEqual(audit_invocations.count(("F1", 2, 20)), 2)
             validate_paired_federated_trajectory_results(*result.trajectories)
+            self.assertNotEqual(
+                result.trajectories[0].round_results[1].initial_model_sha256,
+                result.trajectories[1].round_results[1].initial_model_sha256,
+            )
             with self.assertRaises(PilotExecutionError):
                 validate_paired_federated_trajectory_results(
                     result.trajectories[0],
@@ -538,6 +594,38 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
                         result.trajectories[1],
                         baseline_model_sha256="f" * 64,
                     ),
+                )
+            invalid_f1_rounds = list(result.trajectories[1].round_results)
+            invalid_f1_rounds[1] = dataclasses.replace(
+                invalid_f1_rounds[1],
+                initial_model_sha256="e" * 64,
+            )
+            with self.assertRaisesRegex(
+                PilotExecutionError,
+                "rodada 2",
+            ):
+                validate_paired_federated_trajectory_results(
+                    result.trajectories[0],
+                    dataclasses.replace(
+                        result.trajectories[1],
+                        round_results=tuple(invalid_f1_rounds),
+                    ),
+                )
+            invalid_f0_rounds = list(result.trajectories[0].round_results)
+            invalid_f0_rounds[0] = dataclasses.replace(
+                invalid_f0_rounds[0],
+                initial_model_sha256="d" * 64,
+            )
+            with self.assertRaisesRegex(
+                PilotExecutionError,
+                "rodada 1",
+            ):
+                validate_paired_federated_trajectory_results(
+                    dataclasses.replace(
+                        result.trajectories[0],
+                        round_results=tuple(invalid_f0_rounds),
+                    ),
+                    result.trajectories[1],
                 )
             self.assertTrue(
                 (Path(directory) / "runs/test-pilot/completed.json").is_file()
@@ -575,7 +663,7 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
                 model_loader=loader,
             )
             self.assertEqual(repeated.as_safe_dict(), result.as_safe_dict())
-            self.assertEqual(len(round_calls), 40)
+            self.assertEqual(len(round_calls), 41)
 
 
 if __name__ == "__main__":

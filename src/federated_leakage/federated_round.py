@@ -454,12 +454,10 @@ def run_non_private_federated_round(
         raise FedAvgError("falha ao construir resultado seguro da rodada") from error
 
 
-def validate_paired_federated_round_results(
+def _validate_paired_federated_round_controls(
     benign: FedAvgRoundResult,
     adversarial: FedAvgRoundResult,
-) -> None:
-    """Confirma o pareamento observável entre uma rodada F0 e sua rodada F1."""
-
+) -> tuple[FedAvgRoundResult, FedAvgRoundResult]:
     first = _validate_round_result(benign)
     second = _validate_round_result(adversarial)
     if first.scenario != "F0" or second.scenario != "F1":
@@ -479,17 +477,55 @@ def validate_paired_federated_round_results(
         "victim_dataset_sha256",
         "auxiliary_schedule_sha256",
         "auxiliary_values_sha256",
-        "initial_model_sha256",
         "model_provenance",
     )
-    if any(getattr(first, field) != getattr(second, field) for field in paired_fields):
-        raise FedAvgError("resultados F0/F1 não preservam o pareamento")
+    for field in paired_fields:
+        if getattr(first, field) != getattr(second, field):
+            raise FedAvgError(
+                f"pareamento da rodada {first.round_id} diverge em {field}"
+            )
     if (
         first.auxiliary_presentation_sha256
         == second.auxiliary_presentation_sha256
         or first.auxiliary_batch_sha256 == second.auxiliary_batch_sha256
     ):
-        raise FedAvgError("apresentações auxiliares pareadas não diferem")
+        raise FedAvgError(
+            f"apresentações auxiliares da rodada {first.round_id} não diferem"
+        )
+    return first, second
+
+
+def validate_paired_federated_round_results(
+    benign: FedAvgRoundResult,
+    adversarial: FedAvgRoundResult,
+) -> None:
+    """Confirma uma rodada F0/F1 isolada com o mesmo estado inicial."""
+
+    first, second = _validate_paired_federated_round_controls(benign, adversarial)
+    if first.initial_model_sha256 != second.initial_model_sha256:
+        raise FedAvgError(
+            f"pareamento do estado inicial da rodada {first.round_id} diverge"
+        )
+
+
+def validate_paired_federated_trajectory_round_results(
+    benign: FedAvgRoundResult,
+    adversarial: FedAvgRoundResult,
+    *,
+    expected_benign_initial_model_sha256: str,
+    expected_adversarial_initial_model_sha256: str,
+) -> None:
+    """Confirma controles pareados e continuidade própria de cada trajetória."""
+
+    first, second = _validate_paired_federated_round_controls(benign, adversarial)
+    if not _is_sha256(expected_benign_initial_model_sha256) or not _is_sha256(
+        expected_adversarial_initial_model_sha256
+    ):
+        raise FedAvgError("estado inicial esperado da trajetória é inválido")
+    if first.initial_model_sha256 != expected_benign_initial_model_sha256:
+        raise FedAvgError(f"continuidade F0 da rodada {first.round_id} diverge")
+    if second.initial_model_sha256 != expected_adversarial_initial_model_sha256:
+        raise FedAvgError(f"continuidade F1 da rodada {second.round_id} diverge")
 
 
 __all__ = [
@@ -499,5 +535,6 @@ __all__ = [
     "prepare_victim_training_inputs",
     "run_non_private_federated_round",
     "validate_paired_federated_round_results",
+    "validate_paired_federated_trajectory_round_results",
     "validate_federated_round_result",
 ]

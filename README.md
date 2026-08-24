@@ -314,7 +314,9 @@ O piloto fixado usa seed `101`, `k=1`, audita B0 uma vez, percorre F0 por 20
 rodadas, recarrega o baseline e percorre F1 por 20 rodadas. O orçamento de 20
 alvos é auditado em todos os 41 checkpoints; 1, 5 e 200 alvos são adicionados em
 B0 e na rodada 20 de cada trajetória. O total é de 44.000 conversas, 11.000
-passos locais e 69.710 gerações.
+passos locais e 69.710 gerações. F0 e F1 compartilham o baseline somente na
+rodada 1; depois, cada trajetória continua de seu próprio modelo final anterior,
+mantendo pareados os dados, pesos, seeds e demais controles experimentais.
 
 Todo processo Python que use CUDA determinístico deve receber, antes de iniciar,
 o valor exato abaixo. O programa valida o contrato e falha se a variável estiver
@@ -416,8 +418,8 @@ perda, ordem canônica, anotações, colisões, round-trip JSONL, manifestos seg
 tokenização, máscaras, padding, perda por conversa, gradient accumulation,
 rollback, deltas em streaming, pesos FedAvg, aplicação atômica, pareamento F0/F1
 e auditoria com orçamentos aninhados, checkpoints `safetensors`, retomada
-transacional e o piloto pareado simulado completo, além do carregamento estrito
-e offline do modelo. Os
+transacional, continuidade independente das trajetórias e recuperação de falha
+após auditoria, além do carregamento estrito e offline do modelo. Os
 testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
 preparado:
 
