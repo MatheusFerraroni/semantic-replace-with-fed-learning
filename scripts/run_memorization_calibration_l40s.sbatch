@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=memorization-calibration-101
+#SBATCH --job-name=memorization-calibration-greedy-v2
 #SBATCH --partition=l40s
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
@@ -48,7 +48,7 @@ readonly PROJECT_ROOT
 readonly RESOLVED_PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd -P)"
 [[ "$CURRENT_DIRECTORY" == "$RESOLVED_PROJECT_ROOT" ]] || \
     fail "execute o launcher a partir da raiz do repositório"
-[[ -f configs/memorization-calibration-v1.yaml && -f configs/main-v1.yaml ]] || \
+[[ -f configs/memorization-calibration-v2.yaml && -f configs/main-v2.yaml ]] || \
     fail "as configurações da calibração estão ausentes"
 if ! git diff --quiet || ! git diff --cached --quiet; then
     fail "o worktree contém alterações rastreadas"
@@ -65,11 +65,11 @@ import torch
 raise SystemExit(0 if torch.cuda.is_available() and torch.cuda.device_count() == 1 else 1)
 ' || fail "a alocação deve expor exatamente uma GPU CUDA"
 
-readonly CALIBRATION_CONFIG=configs/memorization-calibration-v1.yaml
+readonly CALIBRATION_CONFIG=configs/memorization-calibration-v2.yaml
 readonly CALIBRATION_CACHE=artifacts/huggingface
 readonly CALIBRATION_OUTPUT_ROOT=outputs
 readonly CALIBRATION_SEED=101
-readonly CALIBRATION_RUN_ID=memorization-calibration-seed-101-v1
+readonly CALIBRATION_RUN_ID=memorization-calibration-greedy-seed-101-v2
 readonly CALIBRATION_RUN_DIRECTORY="$PROJECT_ROOT/$CALIBRATION_OUTPUT_ROOT/runs/$CALIBRATION_RUN_ID"
 readonly GIT_COMMIT="$(git rev-parse --verify HEAD)"
 if [[ "$CALIBRATION_MODE" == "resume" && ! -d "$CALIBRATION_RUN_DIRECTORY" ]]; then

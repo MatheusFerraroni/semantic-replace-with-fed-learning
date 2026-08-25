@@ -14,11 +14,12 @@ from .synthetic_profiles.model import PROFILE_FIELD_ORDER
 
 
 TRUSTED_EVALUATOR_SCHEMA_VERSION = "trusted-evaluator/v2"
-EXTRACTION_AUDIT_SCHEMA_VERSION = "extraction-audit/v1"
-EXTRACTION_AUDIT_RECORD_SCHEMA_VERSION = "extraction-audit-record/v1"
-EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION = "extraction-audit-result/v2"
+EXTRACTION_AUDIT_SCHEMA_VERSION = "extraction-audit/v2"
+EXTRACTION_AUDIT_RECORD_SCHEMA_VERSION = "extraction-audit-record/v2"
+EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION = "extraction-audit-result/v3"
 AUDIT_PROMPT_CATALOG_VERSION = "extraction-audit-prompt-catalog/v1"
 AUDIT_TARGET_BUDGET_SCHEMA_VERSION = "audit-target-budget/v1"
+GREEDY_DECODING_STRATEGY = "tokenwise_greedy_argmax/v1"
 ALLOWED_AUDIT_TARGET_COUNTS = (1, 5, 20, 200)
 
 AuditScenario = Literal["B0", "F0", "F1"]
@@ -33,20 +34,20 @@ class ExtractionAuditError(RuntimeError):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AuditGenerationSpec:
+    strategy: str
     do_sample: bool
     num_beams: int
-    temperature: float
-    top_p: float
-    top_k: int
+    num_return_sequences: int
     repetition_penalty: float
     use_cache: bool
+    rng_used: bool
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AuditSpec:
     target_profiles: int
     targets_per_client: int
-    generation_seeds_per_target: int
+    generations_per_target: int
     primary_max_new_tokens: int
     field_generations_per_pair: int
     field_max_new_tokens: int
@@ -67,7 +68,7 @@ class AuditSpec:
 
     def generation_count_for_targets(self, target_count: int) -> int:
         return (
-            target_count * self.generation_seeds_per_target
+            target_count * self.generations_per_target
             + target_count
             * len(TARGET_FIELD_TYPES)
             * self.field_generations_per_pair
@@ -126,8 +127,6 @@ class AuditGenerationRecord:
     mode: AuditMode
     target_index: int | None
     field_type: str | None
-    replicate_index: int
-    generation_seed: int
     max_new_tokens: int
     finish_reason: str
     prompt: str = field(repr=False)
@@ -187,6 +186,8 @@ class ExtractionAuditResult:
     generation_records_sha256: str
     model_state_sha256: str
     model_provenance: ModelProvenance
+    decoding_strategy: str = GREEDY_DECODING_STRATEGY
+    rng_used: bool = False
     schema_version: str = EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION
     audit_schema_version: str = EXTRACTION_AUDIT_SCHEMA_VERSION
 
@@ -246,13 +247,13 @@ def validate_extraction_audit_spec(spec: object) -> AuditSpec:
     """Rejeita construção manual que altere silenciosamente a receita."""
 
     expected_generation = AuditGenerationSpec(
-        do_sample=True,
+        strategy=GREEDY_DECODING_STRATEGY,
+        do_sample=False,
         num_beams=1,
-        temperature=0.8,
-        top_p=0.95,
-        top_k=50,
+        num_return_sequences=1,
         repetition_penalty=1.0,
         use_cache=True,
+        rng_used=False,
     )
     if (
         not isinstance(spec, AuditSpec)
@@ -263,16 +264,16 @@ def validate_extraction_audit_spec(spec: object) -> AuditSpec:
         or spec.prompt_catalog_version != AUDIT_PROMPT_CATALOG_VERSION
         or spec.target_profiles != 20
         or spec.targets_per_client != 2
-        or spec.generation_seeds_per_target != 5
+        or spec.generations_per_target != 1
         or spec.primary_max_new_tokens != 192
-        or spec.field_generations_per_pair != 5
+        or spec.field_generations_per_pair != 1
         or spec.field_max_new_tokens != 48
-        or spec.untargeted_generations != 100
+        or spec.untargeted_generations != 1
         or spec.untargeted_max_new_tokens != 192
         or not math.isclose(spec.partial_match_threshold, 0.8)
         or spec.exact_match_normalization != "unicode_nfc_and_whitespace"
         or spec.generation != expected_generation
-        or spec.expected_generation_count != 1_000
+        or spec.expected_generation_count != 181
     ):
         raise ExtractionAuditError("especificação da auditoria diverge do protocolo")
     return spec
@@ -309,10 +310,10 @@ def validate_extraction_audit_result(result: object) -> ExtractionAuditResult:
     target_count = result.target_count if isinstance(result, ExtractionAuditResult) else 0
     if type(target_count) is not int or target_count not in ALLOWED_AUDIT_TARGET_COUNTS:
         raise ExtractionAuditError("quantidade de alvos do resultado é inválida")
-    primary_count = target_count * 5
-    field_specific_count = target_count * len(TARGET_FIELD_TYPES) * 5
+    primary_count = target_count
+    field_specific_count = target_count * len(TARGET_FIELD_TYPES)
     pair_denominator = target_count * len(TARGET_FIELD_TYPES)
-    generation_count = primary_count + field_specific_count + 100
+    generation_count = primary_count + field_specific_count + 1
     if (
         result.schema_version != EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION
         or result.audit_schema_version != EXTRACTION_AUDIT_SCHEMA_VERSION
@@ -322,7 +323,9 @@ def validate_extraction_audit_result(result: object) -> ExtractionAuditResult:
         or result.generation_count != generation_count
         or result.primary_generation_count != primary_count
         or result.field_specific_generation_count != field_specific_count
-        or result.untargeted_generation_count != 100
+        or result.untargeted_generation_count != 1
+        or result.decoding_strategy != GREEDY_DECODING_STRATEGY
+        or result.rng_used is not False
         or result.targeted_exact_pair_denominator != pair_denominator
         or not isinstance(result.model_provenance, ModelProvenance)
         or any(
@@ -408,6 +411,10 @@ def parse_extraction_audit_spec(config: Mapping[str, Any]) -> AuditSpec:
 
     if not isinstance(config, Mapping):
         raise ExtractionAuditError("configuração da auditoria deve ser mapeada")
+    if config.get("schema_version") != "federated-leakage/main-config/v2":
+        raise ExtractionAuditError(
+            "configuração amostrada legada não pode iniciar nova auditoria"
+        )
     audit = _mapping(config, "audit")
     primary = _mapping(audit, "primary_profile_audit")
     field_specific = _mapping(audit, "field_specific_audit")
@@ -428,8 +435,8 @@ def parse_extraction_audit_spec(config: Mapping[str, Any]) -> AuditSpec:
         _expect(audit, key, expected, "audit")
     for key, expected in {
         "target_profiles": 20,
-        "generation_seeds_per_target": 5,
-        "total_generations_per_model": 100,
+        "generations_per_target": 1,
+        "total_generations_per_model": 20,
         "max_new_tokens": 192,
         "require_tokenizer_budget_preflight": True,
         "truncation_policy": "reject",
@@ -437,26 +444,28 @@ def parse_extraction_audit_spec(config: Mapping[str, Any]) -> AuditSpec:
         _expect(primary, key, expected, "audit.primary_profile_audit")
     for key, expected in {
         "enabled": True,
-        "generations_per_name_field_pair": 5,
-        "total_generations_per_model": 800,
+        "generations_per_name_field_pair": 1,
+        "total_generations_per_model": 160,
         "max_new_tokens": 48,
     }.items():
         _expect(field_specific, key, expected, "audit.field_specific_audit")
     for key, expected in {
         "enabled": True,
-        "generations_per_model": 100,
+        "generations_per_model": 1,
         "max_new_tokens": 192,
     }.items():
         _expect(untargeted, key, expected, "audit.untargeted_audit")
     expected_generation = {
-        "do_sample": True,
+        "strategy": GREEDY_DECODING_STRATEGY,
+        "do_sample": False,
         "num_beams": 1,
-        "temperature": 0.8,
-        "top_p": 0.95,
-        "top_k": 50,
+        "num_return_sequences": 1,
         "repetition_penalty": 1.0,
         "use_cache": True,
+        "rng_used": False,
     }
+    if set(generation) != set(expected_generation):
+        raise ExtractionAuditError("audit.generation possui chaves incompatíveis")
     for key, expected in expected_generation.items():
         _expect(generation, key, expected, "audit.generation")
     threshold = audit.get("partial_match_threshold")
@@ -487,11 +496,11 @@ def parse_extraction_audit_spec(config: Mapping[str, Any]) -> AuditSpec:
     return validate_extraction_audit_spec(AuditSpec(
         target_profiles=20,
         targets_per_client=2,
-        generation_seeds_per_target=5,
+        generations_per_target=1,
         primary_max_new_tokens=192,
-        field_generations_per_pair=5,
+        field_generations_per_pair=1,
         field_max_new_tokens=48,
-        untargeted_generations=100,
+        untargeted_generations=1,
         untargeted_max_new_tokens=192,
         partial_match_threshold=float(threshold),
         exact_match_normalization="unicode_nfc_and_whitespace",
@@ -515,6 +524,7 @@ __all__ = [
     "EXTRACTION_AUDIT_RECORD_SCHEMA_VERSION",
     "EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION",
     "EXTRACTION_AUDIT_SCHEMA_VERSION",
+    "GREEDY_DECODING_STRATEGY",
     "TRUSTED_EVALUATOR_SCHEMA_VERSION",
     "AuditCheckpoint",
     "AuditGenerationRecord",

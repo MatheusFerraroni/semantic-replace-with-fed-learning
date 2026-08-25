@@ -29,6 +29,7 @@ from .checkpointing import (
     load_federated_checkpoint,
     save_federated_checkpoint,
 )
+from .calibration_gate import load_completed_calibration_gate
 from .execution_contracts import (
     PILOT_EXPECTED_GENERATION_COUNT,
     FederatedTrajectoryResult,
@@ -472,7 +473,7 @@ def _trajectory_result(
         final_model_sha256=round_tuple[-1].final_model_sha256,
         round_results=round_tuple,
         audit_results=audit_tuple,
-        result_sha256=_canonical_hash(payload, b"federated-trajectory-result/v1"),
+        result_sha256=_canonical_hash(payload, b"federated-trajectory-result/v2"),
     )
 
 
@@ -1012,8 +1013,11 @@ def run_paired_pilot(
     except ReproducibilityEnvironmentError as error:
         raise PilotExecutionError(str(error)) from error
     resolved = validate_pilot_execution_spec(spec)
+    calibration_gate = load_completed_calibration_gate(output_root, resolved)
     if identity.experiment_seed != resolved.experiment_seed or (
         identity.config_sha256 != resolved.config_sha256
+    ) or identity.calibration_result_sha256 != calibration_gate.result_sha256 or (
+        identity.calibration_manifest_sha256 != calibration_gate.manifest_sha256
     ):
         raise PilotExecutionError("identidade da execução diverge da configuração")
     try:
@@ -1044,6 +1048,11 @@ def run_paired_pilot(
     try:
         first_bundle = loader()
         baseline_model_sha256 = fingerprint_model_parameters(first_bundle)
+        if (
+            baseline_model_sha256 != calibration_gate.baseline_model_sha256
+            or first_bundle.provenance != calibration_gate.model_provenance
+        ):
+            raise PilotExecutionError("modelo diverge do gate da calibração")
         victim_inputs = prepare_victim_training_inputs(victims, first_bundle)
         contexts = {
             count: prepare_trusted_evaluator(
@@ -1063,6 +1072,8 @@ def run_paired_pilot(
                 **data_preflight.as_safe_dict(),
                 "model_state_sha256": baseline_model_sha256,
                 "tokenization_validated": True,
+                "calibration_result_sha256": calibration_gate.result_sha256,
+                "calibration_manifest_sha256": calibration_gate.manifest_sha256,
             }
         )
 
@@ -1171,7 +1182,7 @@ def run_paired_pilot(
             "baseline": baseline_model_sha256,
             "baseline_audit": baseline_audit_sha256,
         },
-        b"paired-pilot-result/v1",
+        b"paired-pilot-result/v2",
     )
     result = PilotExecutionResult(
         identity=identity,

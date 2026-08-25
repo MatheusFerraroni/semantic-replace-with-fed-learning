@@ -7,6 +7,7 @@ from federated_leakage.execution_contracts import (
     build_pilot_run_identity,
     load_pilot_execution_spec_from_config,
 )
+from federated_leakage.calibration_gate import load_completed_calibration_gate
 from federated_leakage.pilot_execution import run_paired_pilot
 
 
@@ -16,9 +17,15 @@ from federated_leakage.pilot_execution import run_paired_pilot
 )
 class RealPilotPreflightSmokeTests(unittest.TestCase):
     def test_validates_real_model_tokenizer_and_all_synthetic_schedules_offline(self):
-        config = Path("configs/main-v1.yaml")
+        config = Path("configs/main-v2.yaml")
         spec = load_pilot_execution_spec_from_config(config)
-        identity = build_pilot_run_identity(spec, run_id="pilot-preflight-smoke")
+        gate = load_completed_calibration_gate(Path("outputs"), spec)
+        identity = build_pilot_run_identity(
+            spec,
+            run_id="pilot-preflight-smoke",
+            calibration_result_sha256=gate.result_sha256,
+            calibration_manifest_sha256=gate.manifest_sha256,
+        )
         result = run_paired_pilot(
             spec,
             identity,

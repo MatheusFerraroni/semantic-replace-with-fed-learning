@@ -21,7 +21,7 @@ from .audit_contracts import (
 from .synthetic_profiles.storage import validate_storage_component
 
 
-EXTRACTION_AUDIT_JOURNAL_SCHEMA_VERSION = "extraction-audit-journal/v2"
+EXTRACTION_AUDIT_JOURNAL_SCHEMA_VERSION = "extraction-audit-journal/v3"
 TRUSTED_EVALUATOR_TARGET_MANIFEST_SCHEMA_VERSION = (
     "trusted-evaluator-target-manifest/v2"
 )
@@ -153,7 +153,7 @@ def _spec_payload(spec: AuditSpec) -> dict[str, Any]:
         "prompt_catalog_version": spec.prompt_catalog_version,
         "target_profiles": spec.target_profiles,
         "targets_per_client": spec.targets_per_client,
-        "generation_seeds_per_target": spec.generation_seeds_per_target,
+        "generations_per_target": spec.generations_per_target,
         "primary_max_new_tokens": spec.primary_max_new_tokens,
         "field_generations_per_pair": spec.field_generations_per_pair,
         "field_max_new_tokens": spec.field_max_new_tokens,
@@ -162,13 +162,13 @@ def _spec_payload(spec: AuditSpec) -> dict[str, Any]:
         "partial_match_threshold": spec.partial_match_threshold,
         "exact_match_normalization": spec.exact_match_normalization,
         "generation": {
+            "strategy": spec.generation.strategy,
             "do_sample": spec.generation.do_sample,
             "num_beams": spec.generation.num_beams,
-            "temperature": spec.generation.temperature,
-            "top_p": spec.generation.top_p,
-            "top_k": spec.generation.top_k,
+            "num_return_sequences": spec.generation.num_return_sequences,
             "repetition_penalty": spec.generation.repetition_penalty,
             "use_cache": spec.generation.use_cache,
+            "rng_used": spec.generation.rng_used,
         },
     }
 
@@ -215,8 +215,6 @@ def _record_payload(record: AuditGenerationRecord) -> dict[str, Any]:
         "target_index": record.target_index,
         "target_entity_id": record.target_entity_id,
         "field_type": record.field_type,
-        "replicate_index": record.replicate_index,
-        "generation_seed": record.generation_seed,
         "max_new_tokens": record.max_new_tokens,
         "finish_reason": record.finish_reason,
         "prompt": record.prompt,
@@ -232,8 +230,6 @@ _RECORD_KEYS = frozenset(
         "target_index",
         "target_entity_id",
         "field_type",
-        "replicate_index",
-        "generation_seed",
         "max_new_tokens",
         "finish_reason",
         "prompt",
@@ -253,10 +249,6 @@ def _record_from_payload(value: Mapping[str, Any]) -> AuditGenerationRecord:
         or type(record.query_index) is not int
         or record.query_index < 0
         or record.mode not in {"primary", "field_specific", "untargeted"}
-        or type(record.replicate_index) is not int
-        or record.replicate_index < 0
-        or type(record.generation_seed) is not int
-        or record.generation_seed < 0
         or type(record.max_new_tokens) is not int
         or record.max_new_tokens <= 0
         or record.finish_reason not in {"eos", "max_tokens"}
@@ -510,16 +502,17 @@ def prepare_audit_journal(
             _canonical_json_bytes(expected_metadata),
         )
     records = _load_records(incomplete_directory / "extraction_results.jsonl")
-    if len(records) > spec.expected_generation_count:
+    target_expected_count = spec.generation_count_for_targets(
+        context.target_budget.target_count
+    )
+    if len(records) > target_expected_count:
         raise ExtractionAuditError("journal excede a contagem esperada")
     return AuditJournal(
         incomplete_directory=incomplete_directory,
         final_directory=final_directory,
         summary_path=summary_path,
         records=records,
-        expected_count=spec.generation_count_for_targets(
-            context.target_budget.target_count
-        ),
+        expected_count=target_expected_count,
     )
 
 

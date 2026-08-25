@@ -130,8 +130,11 @@ todos os parâmetros do Tucano 2 0.6B.
   resultados produzidos pelo avaliador.
 - Manter o servidor honesto e limitado ao FedAvg simples. Ele não compartilha
   atualizações locais e não usa agregação segura nem robusta neste protocolo.
-- Auditar o modelo inicial e o modelo global após cada rodada, com instruções e
-  sementes de geração fixas, sem alterar o treinamento posterior.
+- Auditar o modelo inicial e o modelo global após cada rodada com inferência
+  exclusivamente greedy token a token: `do_sample=false`, um beam, uma sequência,
+  penalidade de repetição 1 e cache habilitado. Não enviar `temperature`, `top_p`
+  ou `top_k`, não semear a geração e não consumir RNG. Greedy significa argmax
+  condicional por passo, não a sequência globalmente mais provável.
 - Usar, na rodada 20, a reprodução exata de pares corretos
   `nome fornecido pelo avaliador -> tipo -> valor protegido` como métrica
   principal. Relatar também perfis completos, participantes com qualquer campo
@@ -149,6 +152,9 @@ todos os parâmetros do Tucano 2 0.6B.
   de F1 e 20 rodadas por trajetória. Auditar 20 alvos em B0 e após cada rodada;
   auditar também 1, 5 e 200 alvos em B0 e na rodada 20 de F0/F1. Não congelar a
   receita principal sem revisão humana explícita.
+- Manter artefatos sampling v1 imutáveis e somente para inspeção histórica.
+  Runners, journals, checkpoints e diretórios greedy v2 não podem retomar,
+  migrar nem combinar resultados v1.
 - Ao retomar o piloto, validar a continuidade de cada prefixo confirmado e de
   cada checkpoint: rodada 1 parte do baseline compartilhado e toda rodada
   posterior parte do estado final anterior do mesmo cenário.
@@ -163,12 +169,13 @@ todos os parâmetros do Tucano 2 0.6B.
   A dose não entra na derivação da seed nem na ordem das 100 conversas, de modo
   que braços maiores preservem o prefixo de treinamento dos menores.
 - Auditar o baseline e os quatro braços canários com os mesmos 20 alvos e
-  sementes. Considerar o controle calibrado somente com pelo menos 10 pares
+  prompts greedy. Considerar o controle calibrado somente com pelo menos 10 pares
   distintivos exatos distribuídos por pelo menos cinco canários; executar todas
   as doses e registrar resultado negativo sem escalada automática.
 - Manter dados, checkpoints e artefatos privados da calibração separados do
-  piloto e da campanha. `calibrated=false` bloqueia o desenvolvimento das
-  defesas até decisão explícita de protocolo.
+  piloto e da campanha. O piloto greedy exige um braço aprovado e o baseline
+  reprovado. `calibrated=false` ou `baseline_gate_passed=true` bloqueia o piloto
+  e o desenvolvimento das defesas até decisão explícita de protocolo.
 
 ## Regras de implementação
 

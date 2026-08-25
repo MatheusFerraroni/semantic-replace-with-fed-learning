@@ -25,6 +25,7 @@ from federated_leakage.model_contracts import (
     LoadedModelBundle,
     ModelProvenance,
 )
+from federated_leakage.model_fingerprint import fingerprint_model_parameters
 from federated_leakage.model_updates import (
     capture_model_parameter_snapshot,
     iter_local_parameter_deltas,
@@ -166,6 +167,10 @@ class TrainingConfigurationTests(unittest.TestCase):
         self.assertEqual(spec.optimizer_steps, 25)
         self.assertEqual(spec.max_physical_conversations, 1)
         self.assertEqual(spec.update_dtype, "float32")
+        self.assertEqual(
+            spec,
+            load_local_training_spec_from_config(Path("configs/main-v2.yaml")),
+        )
 
     def test_rejects_recipe_drift_and_duplicate_yaml_without_values(self):
         import yaml
@@ -267,7 +272,7 @@ class LocalClientTrainingTests(unittest.TestCase):
     def setUpClass(cls):
         cls.spec = load_local_training_spec_from_config(Path("configs/main-v1.yaml"))
 
-    def _train(self, samples=None, model=None, role="victim", round_id=1):
+    def _train(self, samples=None, model=None, role="victim", round_id=1, spec=None):
         resolved_model = model or LlamaForCausalLM()
         bundle = _bundle(
             resolved_model,
@@ -280,7 +285,7 @@ class LocalClientTrainingTests(unittest.TestCase):
             result = train_local_client(
                 samples or _samples(),
                 bundle,
-                self.spec,
+                spec or self.spec,
                 seed=11,
                 role=role,
                 round_id=round_id,
@@ -315,6 +320,17 @@ class LocalClientTrainingTests(unittest.TestCase):
         first = self._train()
         second = self._train()
         self.assertTrue(torch.equal(first[0].model.weight, second[0].model.weight))
+        self.assertEqual(first[2].as_safe_dict(), second[2].as_safe_dict())
+
+    def test_greedy_v2_does_not_change_the_v1_training_fingerprint(self):
+        v1 = load_local_training_spec_from_config(Path("configs/main-v1.yaml"))
+        v2 = load_local_training_spec_from_config(Path("configs/main-v2.yaml"))
+        first = self._train(spec=v1)
+        second = self._train(spec=v2)
+        with _tiny_parameter_contract():
+            first_hash = fingerprint_model_parameters(first[0])
+            second_hash = fingerprint_model_parameters(second[0])
+        self.assertEqual(first_hash, second_hash)
         self.assertEqual(first[2].as_safe_dict(), second[2].as_safe_dict())
 
     def test_auxiliary_pair_uses_same_training_seed_and_order_derivation(self):

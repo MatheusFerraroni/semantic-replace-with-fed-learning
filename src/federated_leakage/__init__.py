@@ -7,6 +7,7 @@ from .audit_contracts import (
     EXTRACTION_AUDIT_RECORD_SCHEMA_VERSION,
     EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION,
     EXTRACTION_AUDIT_SCHEMA_VERSION,
+    GREEDY_DECODING_STRATEGY,
     TRUSTED_EVALUATOR_SCHEMA_VERSION,
     AuditCheckpoint,
     AuditGenerationRecord,
@@ -20,6 +21,12 @@ from .audit_contracts import (
     validate_extraction_audit_spec,
     validate_extraction_audit_result,
     validate_audit_target_budget,
+)
+from .calibration_gate import CalibrationGate, load_completed_calibration_gate
+from .legacy_audit import (
+    read_legacy_extraction_audit_summary,
+    read_legacy_memorization_calibration_summary,
+    read_legacy_pilot_summary,
 )
 
 from .aggregation_contracts import (
@@ -191,6 +198,7 @@ __all__ = [
     "EXTRACTION_AUDIT_RECORD_SCHEMA_VERSION",
     "EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION",
     "EXTRACTION_AUDIT_SCHEMA_VERSION",
+    "GREEDY_DECODING_STRATEGY",
     "ExtractionAuditError",
     "ExtractionAuditResult",
     "FEDAVG_AGGREGATION_SCHEMA_VERSION",
@@ -293,6 +301,7 @@ __all__ = [
     "POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION",
     "POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION",
     "CanaryFieldMetric",
+    "CalibrationGate",
     "MemorizationCalibrationArmResult",
     "MemorizationCalibrationError",
     "MemorizationCalibrationPreflightResult",
@@ -302,12 +311,16 @@ __all__ = [
     "PositiveCanaryAuditResult",
     "PositiveCanaryEvaluatorContext",
     "load_calibration_checkpoint",
+    "load_completed_calibration_gate",
     "load_memorization_calibration_spec_from_config",
     "preflight_memorization_calibration",
     "preflight_positive_canary_audit",
     "prepare_positive_canary_evaluator",
     "run_memorization_calibration",
     "run_positive_canary_audit",
+    "read_legacy_extraction_audit_summary",
+    "read_legacy_memorization_calibration_summary",
+    "read_legacy_pilot_summary",
     "save_calibration_checkpoint",
     "score_positive_canary_audit",
     "train_memorization_calibration_arm",

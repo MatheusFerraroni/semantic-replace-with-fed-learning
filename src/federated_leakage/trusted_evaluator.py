@@ -58,11 +58,7 @@ from .synthetic_profiles.rendering import (
     CANONICAL_COMPLETION_TEMPLATE,
     CANONICAL_PREFIX_TEMPLATE,
 )
-from .synthetic_profiles.seeding import (
-    derive_integer,
-    derive_seed_material,
-    permuted_tuple,
-)
+from .synthetic_profiles.seeding import derive_seed_material, permuted_tuple
 from .synthetic_profiles.validation import validate_victim_dataset
 
 
@@ -92,8 +88,6 @@ class _AuditQuery:
     target_index: int | None
     target_entity_id: str | None
     field_type: str | None
-    replicate_index: int
-    generation_seed: int
     max_new_tokens: int
     prompt: str
 
@@ -363,11 +357,6 @@ def _query_schedule(
     spec: AuditSpec,
     context: TrustedEvaluatorContext,
 ) -> Tuple[_AuditQuery, ...]:
-    seed_material = derive_seed_material(
-        context.experiment_seed,
-        namespace="trusted-evaluator",
-        schedule_id="generation-schedule/v1",
-    )
     queries: list[_AuditQuery] = []
 
     def append(
@@ -375,7 +364,6 @@ def _query_schedule(
         *,
         target_index: int | None,
         field_type: str | None,
-        replicate_index: int,
         max_new_tokens: int,
         prompt: str,
     ) -> None:
@@ -385,19 +373,6 @@ def _query_schedule(
             if target_index is not None
             else None
         )
-        stable_target = (
-            f"{context.targets[target_index].client_id}/"
-            f"{context.targets[target_index].entity_id}"
-            if target_index is not None
-            else "none"
-        )
-        generation_seed = derive_integer(
-            seed_material,
-            mode,
-            stable_target,
-            field_type or "none",
-            replicate_index,
-        ) % (2**63)
         queries.append(
             _AuditQuery(
                 query_index=index,
@@ -405,8 +380,6 @@ def _query_schedule(
                 target_index=target_index,
                 target_entity_id=target_entity_id,
                 field_type=field_type,
-                replicate_index=replicate_index,
-                generation_seed=generation_seed,
                 max_new_tokens=max_new_tokens,
                 prompt=prompt,
             )
@@ -416,38 +389,32 @@ def _query_schedule(
         prompt = CANONICAL_PREFIX_TEMPLATE.format(
             PERSON_NAME=target.value("PERSON_NAME")
         )
-        for replicate in range(spec.generation_seeds_per_target):
-            append(
-                "primary",
-                target_index=target_index,
-                field_type=None,
-                replicate_index=replicate,
-                max_new_tokens=spec.primary_max_new_tokens,
-                prompt=prompt,
-            )
+        append(
+            "primary",
+            target_index=target_index,
+            field_type=None,
+            max_new_tokens=spec.primary_max_new_tokens,
+            prompt=prompt,
+        )
     for target_index, target in enumerate(context.targets):
         for field_type in TARGET_FIELD_TYPES:
             prompt = FIELD_SPECIFIC_PROMPT_TEMPLATES[field_type].format(
                 PERSON_NAME=target.value("PERSON_NAME")
             )
-            for replicate in range(spec.field_generations_per_pair):
-                append(
-                    "field_specific",
-                    target_index=target_index,
-                    field_type=field_type,
-                    replicate_index=replicate,
-                    max_new_tokens=spec.field_max_new_tokens,
-                    prompt=prompt,
-                )
-    for replicate in range(spec.untargeted_generations):
-        append(
-            "untargeted",
-            target_index=None,
-            field_type=None,
-            replicate_index=replicate,
-            max_new_tokens=spec.untargeted_max_new_tokens,
-            prompt=UNTARGETED_PROMPT,
-        )
+            append(
+                "field_specific",
+                target_index=target_index,
+                field_type=field_type,
+                max_new_tokens=spec.field_max_new_tokens,
+                prompt=prompt,
+            )
+    append(
+        "untargeted",
+        target_index=None,
+        field_type=None,
+        max_new_tokens=spec.untargeted_max_new_tokens,
+        prompt=UNTARGETED_PROMPT,
+    )
     if len(queries) != spec.generation_count_for_targets(
         context.target_budget.target_count
     ):
@@ -459,17 +426,15 @@ def _query_schedule_sha256(queries: Sequence[_AuditQuery]) -> str:
     payload = [
         {
             "field_type": query.field_type,
-            "generation_seed": query.generation_seed,
             "max_new_tokens": query.max_new_tokens,
             "mode": query.mode,
             "prompt_sha256": _sha256(query.prompt.encode("utf-8")),
             "query_index": query.query_index,
-            "replicate_index": query.replicate_index,
             "target_index": query.target_index,
         }
         for query in queries
     ]
-    return _sha256(b"trusted-audit-query-schedule/v1\0" + _canonical_json_bytes(payload))
+    return _sha256(b"trusted-audit-query-schedule/v2\0" + _canonical_json_bytes(payload))
 
 
 def _one_dimensional(value: Any, label: str) -> Tuple[int, ...]:
@@ -601,7 +566,7 @@ def preflight_extraction_audit(
 
 
 @contextmanager
-def _sampling_state(torch: Any, model: Any, device: Any, seed: int):
+def _greedy_state(torch: Any, model: Any, device: Any):
     try:
         validate_cuda_reproducibility_environment(device)
     except ReproducibilityEnvironmentError as error:
@@ -624,11 +589,6 @@ def _sampling_state(torch: Any, model: Any, device: Any, seed: int):
             torch.backends.cuda.matmul.allow_tf32 = False
         if cudnn_tf32 is not None:
             torch.backends.cudnn.allow_tf32 = False
-        torch.manual_seed(seed)
-        if device.type == "cuda":
-            torch.cuda.manual_seed(seed)
-        elif device.type == "mps":
-            torch.mps.manual_seed(seed)
         model.eval()
         yield
     finally:
@@ -677,17 +637,13 @@ def _generate_query(
         device = parameter.device
         input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
         attention_mask = torch.tensor([attention], dtype=torch.long, device=device)
-        with _sampling_state(
-            torch, bundle.model, device, query.generation_seed
-        ), torch.inference_mode():
+        with _greedy_state(torch, bundle.model, device), torch.inference_mode():
             output = bundle.model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 do_sample=spec.generation.do_sample,
                 num_beams=spec.generation.num_beams,
-                temperature=spec.generation.temperature,
-                top_p=spec.generation.top_p,
-                top_k=spec.generation.top_k,
+                num_return_sequences=spec.generation.num_return_sequences,
                 repetition_penalty=spec.generation.repetition_penalty,
                 use_cache=spec.generation.use_cache,
                 max_new_tokens=query.max_new_tokens,
@@ -740,8 +696,6 @@ def _generate_query(
         target_index=query.target_index,
         target_entity_id=query.target_entity_id,
         field_type=query.field_type,
-        replicate_index=query.replicate_index,
-        generation_seed=query.generation_seed,
         max_new_tokens=query.max_new_tokens,
         finish_reason=finish_reason,
         prompt=query.prompt,
@@ -839,12 +793,10 @@ def _generation_record_payload(record: AuditGenerationRecord) -> dict[str, Any]:
         "field_type": record.field_type,
         "finish_reason": record.finish_reason,
         "generated_text": record.generated_text,
-        "generation_seed": record.generation_seed,
         "max_new_tokens": record.max_new_tokens,
         "mode": record.mode,
         "prompt": record.prompt,
         "query_index": record.query_index,
-        "replicate_index": record.replicate_index,
         "schema_version": record.schema_version,
         "target_entity_id": record.target_entity_id,
         "target_index": record.target_index,
@@ -853,7 +805,7 @@ def _generation_record_payload(record: AuditGenerationRecord) -> dict[str, Any]:
 
 def generation_records_sha256(records: Sequence[AuditGenerationRecord]) -> str:
     return _sha256(
-        b"extraction-audit-records/v1\0"
+        b"extraction-audit-records/v2\0"
         + b"".join(_canonical_json_bytes(_generation_record_payload(record)) for record in records)
     )
 
@@ -887,14 +839,12 @@ def score_extraction_audit(
         raise ExtractionAuditError("auditoria não possui todas as gerações")
     for record, query in zip(resolved, queries):
         if (
-            record.schema_version != "extraction-audit-record/v1"
+            record.schema_version != "extraction-audit-record/v2"
             or record.query_index != query.query_index
             or record.mode != query.mode
             or record.target_index != query.target_index
             or record.target_entity_id != query.target_entity_id
             or record.field_type != query.field_type
-            or record.replicate_index != query.replicate_index
-            or record.generation_seed != query.generation_seed
             or record.max_new_tokens != query.max_new_tokens
             or record.prompt != query.prompt
             or record.finish_reason not in {"eos", "max_tokens"}
@@ -997,7 +947,7 @@ def score_extraction_audit(
                 ordered_generations += 1
 
     target_count = context.target_budget.target_count
-    primary_generation_count = target_count * spec.generation_seeds_per_target
+    primary_generation_count = target_count * spec.generations_per_target
     field_specific_generation_count = (
         target_count * len(TARGET_FIELD_TYPES) * spec.field_generations_per_pair
     )
@@ -1019,7 +969,7 @@ def score_extraction_audit(
         generation_count=len(resolved),
         primary_generation_count=primary_generation_count,
         field_specific_generation_count=field_specific_generation_count,
-        untargeted_generation_count=100,
+        untargeted_generation_count=1,
         target_count=target_count,
         targeted_exact_pair_count=len(exact_pairs),
         targeted_exact_pair_denominator=pair_denominator,
@@ -1058,7 +1008,7 @@ def run_extraction_audit(
     run_id: str,
     resume: bool = True,
 ) -> ExtractionAuditResult:
-    """Executa ou retoma as 1.000 consultas e sela os artefatos do avaliador."""
+    """Executa ou retoma a agenda greedy e sela os artefatos do avaliador."""
 
     if not isinstance(model_bundle, LoadedModelBundle):
         raise ExtractionAuditError("bundle de modelo da auditoria é incompatível")
@@ -1127,8 +1077,6 @@ def run_extraction_audit(
             or record.target_index != query.target_index
             or record.target_entity_id != query.target_entity_id
             or record.field_type != query.field_type
-            or record.replicate_index != query.replicate_index
-            or record.generation_seed != query.generation_seed
             or record.max_new_tokens != query.max_new_tokens
             or record.prompt != query.prompt
         ):

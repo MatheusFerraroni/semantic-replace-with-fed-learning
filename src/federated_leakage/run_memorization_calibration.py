@@ -78,6 +78,10 @@ def _summary(
     print(f"apresentacoes_conversas: {result.total_conversation_presentations}")
     print(f"passos_otimizador: {result.total_optimizer_steps}")
     print(f"geracoes_auditoria: {result.total_audit_generations}")
+    print(
+        "baseline_atingiu_gate: "
+        f"{'sim' if result.baseline_gate_passed else 'nao'}"
+    )
     print(f"calibrated: {'sim' if result.calibrated else 'nao'}")
     print(f"primeira_repeticao_bem_sucedida: {result.first_successful_repetition}")
     print(f"resultado_sha256: {result.result_sha256}")

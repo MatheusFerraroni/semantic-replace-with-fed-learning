@@ -128,7 +128,10 @@ def parse_fedavg_spec(config: Mapping[str, Any]) -> FedAvgSpec:
 
     if not isinstance(config, Mapping):
         raise FedAvgError("configuração FedAvg deve ser mapeada")
-    if config.get("schema_version") != "federated-leakage/main-config/v1":
+    if config.get("schema_version") not in {
+        "federated-leakage/main-config/v1",
+        "federated-leakage/main-config/v2",
+    }:
         raise FedAvgError("schema da configuração principal é incompatível")
 
     federated = _mapping(config, "federated")

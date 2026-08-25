@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=federated-pilot-101-k01
+#SBATCH --job-name=federated-pilot-greedy-v2
 #SBATCH --partition=l40s
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
@@ -64,7 +64,7 @@ RESOLVED_PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd -P)" || \
 readonly RESOLVED_PROJECT_ROOT
 [[ "$CURRENT_DIRECTORY" == "$RESOLVED_PROJECT_ROOT" ]] || \
     fail "execute o launcher a partir da raiz do repositório"
-[[ -f configs/main-v1.yaml && -f pyproject.toml ]] || \
+[[ -f configs/main-v2.yaml && -f pyproject.toml ]] || \
     fail "a raiz do projeto está incompleta"
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -89,9 +89,9 @@ if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
 
 readonly PILOT_SEED=101
 readonly PILOT_AUXILIARY_WEIGHT_UNITS=1
-readonly PILOT_RUN_ID=pilot-seed-101-k01
+readonly PILOT_RUN_ID=pilot-greedy-seed-101-k01-v2
 readonly PILOT_DEVICE=cuda
-readonly PILOT_CONFIG=configs/main-v1.yaml
+readonly PILOT_CONFIG=configs/main-v2.yaml
 readonly PILOT_CACHE=artifacts/huggingface
 readonly PILOT_OUTPUT_ROOT=outputs
 readonly PILOT_RUN_DIRECTORY="$PROJECT_ROOT/$PILOT_OUTPUT_ROOT/runs/$PILOT_RUN_ID"

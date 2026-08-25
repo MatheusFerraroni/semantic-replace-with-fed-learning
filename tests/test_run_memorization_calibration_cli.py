@@ -1,4 +1,6 @@
 import io
+import subprocess
+import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -27,6 +29,22 @@ def _preflight():
 
 
 class RunMemorizationCalibrationCliTests(unittest.TestCase):
+    def test_module_help_has_no_runtime_warning(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-W",
+                "error::RuntimeWarning",
+                "-m",
+                "federated_leakage.run_memorization_calibration",
+                "--help",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_preflight_passes_only_operational_overrides(self):
         output = io.StringIO()
         with mock.patch(
@@ -36,7 +54,7 @@ class RunMemorizationCalibrationCliTests(unittest.TestCase):
             status = main(
                 [
                     "--config",
-                    "configs/memorization-calibration-v1.yaml",
+                    "configs/memorization-calibration-v2.yaml",
                     "--device",
                     "cpu",
                     "--preflight-only",
@@ -63,7 +81,7 @@ class RunMemorizationCalibrationCliTests(unittest.TestCase):
             status = main(
                 [
                     "--config",
-                    "configs/memorization-calibration-v1.yaml",
+                    "configs/memorization-calibration-v2.yaml",
                     "--device",
                     "cpu",
                 ]

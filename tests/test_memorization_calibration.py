@@ -1,4 +1,5 @@
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from federated_leakage.calibration_checkpointing import (
     load_calibration_checkpoint,
     save_calibration_checkpoint,
 )
+from federated_leakage.calibration_gate import load_completed_calibration_gate
 from federated_leakage.calibration_contracts import (
     MemorizationCalibrationError,
     PositiveCanaryAuditCheckpoint,
@@ -44,7 +46,14 @@ from federated_leakage.model_contracts import (
 )
 from federated_leakage.model_fingerprint import fingerprint_model_parameters
 from federated_leakage.model_updates import capture_model_parameter_snapshot
-from federated_leakage.memorization_calibration import run_memorization_calibration
+from federated_leakage.execution_contracts import (
+    PilotExecutionError,
+    load_pilot_execution_spec_from_config,
+)
+from federated_leakage.memorization_calibration import (
+    _calibration_outcome,
+    run_memorization_calibration,
+)
 from federated_leakage.synthetic_profiles import (
     AuxiliaryRoundGenerator,
     DatasetStorageError,
@@ -145,7 +154,7 @@ def _samples():
 class CanaryGenerationAndConfigTests(unittest.TestCase):
     def test_fixed_config_and_complete_disjoint_bundle(self):
         spec = load_memorization_calibration_spec_from_config(
-            Path("configs/memorization-calibration-v1.yaml")
+            Path("configs/memorization-calibration-v2.yaml")
         )
         self.assertEqual(spec.repetitions, (1, 5, 10, 20))
         first = PositiveCanaryDatasetGenerator(101).generate()
@@ -204,17 +213,25 @@ class CanaryGenerationAndConfigTests(unittest.TestCase):
     def test_main_config_hash_is_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "main-v1.yaml").write_text("changed: true\n", encoding="utf-8")
-            text = Path("configs/memorization-calibration-v1.yaml").read_text()
+            (root / "main-v2.yaml").write_text("changed: true\n", encoding="utf-8")
+            text = Path("configs/memorization-calibration-v2.yaml").read_text()
             (root / "calibration.yaml").write_text(text, encoding="utf-8")
             with self.assertRaisesRegex(MemorizationCalibrationError, "hash"):
                 load_memorization_calibration_spec_from_config(root / "calibration.yaml")
 
 
 class CanaryTrainingAndCheckpointTests(unittest.TestCase):
+    def test_baseline_gate_blocks_promotion_even_when_an_arm_passes(self):
+        audits = (
+            SimpleNamespace(repetitions=0, calibrated_at_checkpoint=True),
+            SimpleNamespace(repetitions=1, calibrated_at_checkpoint=True),
+            SimpleNamespace(repetitions=5, calibrated_at_checkpoint=False),
+        )
+        self.assertEqual(_calibration_outcome(audits), (True, False, 1))
+
     def test_arm_keeps_one_recipe_and_checkpoint_round_trips(self):
         bundle = _bundle()
-        spec = load_local_training_spec_from_config(Path("configs/main-v1.yaml"))
+        spec = load_local_training_spec_from_config(Path("configs/main-v2.yaml"))
         with (
             mock.patch("federated_leakage.model_updates.EXPECTED_PARAMETER_COUNT", 1),
             mock.patch("federated_leakage.local_training.EXPECTED_VOCAB_SIZE", 4),
@@ -249,7 +266,7 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 self.assertEqual(fingerprint_model_parameters(bundle), result.final_model_sha256)
 
     def test_larger_arm_has_the_exact_training_prefix_of_the_smaller_arm(self):
-        local_spec = load_local_training_spec_from_config(Path("configs/main-v1.yaml"))
+        local_spec = load_local_training_spec_from_config(Path("configs/main-v2.yaml"))
         one_bundle = _bundle()
         five_bundle = _bundle()
         with (
@@ -299,7 +316,7 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
 
     def test_full_small_run_is_idempotent_and_resumes_confirmed_arms(self):
         calibration_spec = load_memorization_calibration_spec_from_config(
-            Path("configs/memorization-calibration-v1.yaml")
+            Path("configs/memorization-calibration-v2.yaml")
         )
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -315,7 +332,8 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
             )
             self.assertEqual(first.total_optimizer_steps, 900)
             self.assertEqual(first.total_conversation_presentations, 3_600)
-            self.assertEqual(first.total_audit_generations, 5_000)
+            self.assertEqual(first.total_audit_generations, 905)
+            self.assertFalse(first.baseline_gate_passed)
             self.assertFalse(first.calibrated)
             self.assertIsNone(first.first_successful_repetition)
             for repetitions in (1, 5, 10, 20):
@@ -341,9 +359,100 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 )
             self.assertEqual(first.result_sha256, resumed.result_sha256)
 
+            completed_path = (
+                Path(directory)
+                / "runs"
+                / calibration_spec.default_run_id
+                / "completed.json"
+            )
+            payload = json.loads(completed_path.read_text(encoding="utf-8"))
+            successful = payload["audits"][-1]
+            for metric in successful["field_metrics"]:
+                if metric["field_type"] in {"CPF", "RG"}:
+                    metric["primary_exact_count"] = 5
+                    metric["primary_partial_count"] = 5
+            successful.update(
+                {
+                    "targeted_exact_pair_count": 10,
+                    "targeted_partial_pair_count": 10,
+                    "distinctive_exact_pair_count": 10,
+                    "distinctive_exposed_entity_count": 5,
+                    "calibrated_at_checkpoint": True,
+                }
+            )
+            payload["calibrated"] = True
+            payload["first_successful_repetition"] = 20
+            without_hash = dict(payload)
+            without_hash.pop("result_sha256")
+            canonical = (
+                json.dumps(
+                    without_hash,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+                + b"\n"
+            )
+            payload["result_sha256"] = hashlib.sha256(
+                b"memorization-calibration-result/v2\0" + canonical
+            ).hexdigest()
+            completed_path.write_text(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            pilot_spec = load_pilot_execution_spec_from_config(
+                Path("configs/main-v2.yaml")
+            )
+            gate = load_completed_calibration_gate(Path(directory), pilot_spec)
+            self.assertEqual(gate.result_sha256, payload["result_sha256"])
+            self.assertEqual(len(gate.manifest_sha256), 64)
+            self.assertEqual(gate.audit_model_sha256[-1], successful["model_state_sha256"])
+
+            manifest_path = completed_path.parent / "run_manifest.json"
+            manifest_raw = manifest_path.read_bytes()
+            manifest = json.loads(manifest_raw)
+            manifest["canary_dataset_sha256"] = "f" * 64
+            manifest_path.write_text(
+                json.dumps(
+                    manifest,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(PilotExecutionError):
+                load_completed_calibration_gate(Path(directory), pilot_spec)
+            manifest_path.write_bytes(manifest_raw)
+
+            payload["schema_version"] = "memorization-calibration/v1"
+            completed_path.write_text(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(PilotExecutionError):
+                load_completed_calibration_gate(Path(directory), pilot_spec)
+
     def test_interrupted_arm_restarts_from_baseline_without_repeating_confirmed_arm(self):
         calibration_spec = load_memorization_calibration_spec_from_config(
-            Path("configs/memorization-calibration-v1.yaml")
+            Path("configs/memorization-calibration-v2.yaml")
         )
 
         def fail_second_arm(*args, **kwargs):
@@ -399,9 +508,9 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
             _bundle(),
             provenance=dataclasses.replace(_provenance(), device="cuda"),
         )
-        local_spec = load_local_training_spec_from_config(Path("configs/main-v1.yaml"))
+        local_spec = load_local_training_spec_from_config(Path("configs/main-v2.yaml"))
         calibration_spec = load_memorization_calibration_spec_from_config(
-            Path("configs/memorization-calibration-v1.yaml")
+            Path("configs/memorization-calibration-v2.yaml")
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(MemorizationCalibrationError, "CUBLAS"):
@@ -426,7 +535,7 @@ class CanaryAuditScoringTests(unittest.TestCase):
     def test_incomplete_canary_audit_repairs_only_terminal_partial_and_resumes(self):
         dataset = PositiveCanaryDatasetGenerator(101).generate()
         context = prepare_positive_canary_evaluator(dataset, 101)
-        spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
         bundle = _bundle()
         with mock.patch("federated_leakage.model_updates.EXPECTED_PARAMETER_COUNT", 1):
             model_hash = fingerprint_model_parameters(bundle)
@@ -468,13 +577,13 @@ class CanaryAuditScoringTests(unittest.TestCase):
                 result = run_positive_canary_audit(
                     spec, context, checkpoint, bundle, output_root=root
                 )
-                self.assertEqual(result.generation_count, 1_000)
+                self.assertEqual(result.generation_count, 181)
                 self.assertFalse((journal.parent).exists())
 
     def test_completed_private_audit_rejects_tampering_and_extra_files(self):
         dataset = PositiveCanaryDatasetGenerator(101).generate()
         context = prepare_positive_canary_evaluator(dataset, 101)
-        spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
         bundle = _bundle()
         with mock.patch("federated_leakage.model_updates.EXPECTED_PARAMETER_COUNT", 1):
             model_hash = fingerprint_model_parameters(bundle)
@@ -494,7 +603,7 @@ class CanaryAuditScoringTests(unittest.TestCase):
                     bundle,
                     output_root=root,
                 )
-                self.assertEqual(result.generation_count, 1_000)
+                self.assertEqual(result.generation_count, 181)
                 summary_raw = (root / "summaries" / "baseline.json").read_text()
                 for protected in context.registry:
                     self.assertNotIn(protected.entity_id, summary_raw)
@@ -527,7 +636,7 @@ class CanaryAuditScoringTests(unittest.TestCase):
     def test_distinctive_threshold_uses_pairs_and_entities(self):
         dataset = PositiveCanaryDatasetGenerator(101).generate()
         context = prepare_positive_canary_evaluator(dataset, 101)
-        spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
         bundle = _bundle()
         with mock.patch("federated_leakage.model_updates.EXPECTED_PARAMETER_COUNT", 1):
             model_hash = fingerprint_model_parameters(bundle)
@@ -545,8 +654,6 @@ class CanaryAuditScoringTests(unittest.TestCase):
                 target_index=query.target_index,
                 target_entity_id=query.target_entity_id,
                 field_type=query.field_type,
-                replicate_index=query.replicate_index,
-                generation_seed=query.generation_seed,
                 max_new_tokens=query.max_new_tokens,
                 finish_reason="max_tokens",
                 prompt=query.prompt,
@@ -556,8 +663,8 @@ class CanaryAuditScoringTests(unittest.TestCase):
         ]
         for target_index in range(5):
             target = context.registry[target_index]
-            records[target_index * 5] = dataclasses.replace(
-                records[target_index * 5],
+            records[target_index] = dataclasses.replace(
+                records[target_index],
                 generated_text=f" {target.value('CPF')} {target.value('EMAIL')}",
             )
         result = score_positive_canary_audit(spec, context, checkpoint, records)
@@ -569,7 +676,7 @@ class CanaryAuditScoringTests(unittest.TestCase):
         self.assertNotIn(context.registry[0].entity_id, safe)
 
     def test_cuda_contract_fails_before_canary_context_validation(self):
-        spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
         cuda_bundle = dataclasses.replace(
             _bundle(),
             provenance=dataclasses.replace(_provenance(), device="cuda"),

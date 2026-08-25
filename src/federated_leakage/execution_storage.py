@@ -32,9 +32,9 @@ from .model_contracts import ModelProvenance
 from .synthetic_profiles.storage import validate_storage_component
 
 
-RUN_MANIFEST_SCHEMA_VERSION = "pilot-run-manifest/v1"
-ROUND_COMMIT_SCHEMA_VERSION = "federated-round-commit/v1"
-PAIRED_ROUND_SCHEMA_VERSION = "paired-federated-round/v1"
+RUN_MANIFEST_SCHEMA_VERSION = "pilot-run-manifest/v2"
+ROUND_COMMIT_SCHEMA_VERSION = "federated-round-commit/v2"
+PAIRED_ROUND_SCHEMA_VERSION = "paired-federated-round/v2"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -351,12 +351,12 @@ def mark_baseline_completed(
     ]
     baseline_audit_sha256 = safe_payload_sha256(
         {
-            "schema_version": "pilot-baseline-audits/v1",
+            "schema_version": "pilot-baseline-audits/v2",
             "audits": audit_payload,
         }
     )
     payload = {
-        "schema_version": "pilot-baseline/v1",
+        "schema_version": "pilot-baseline/v2",
         "baseline_model_sha256": baseline_model_sha256,
         "baseline_audit_sha256": baseline_audit_sha256,
         "audits": audit_payload,

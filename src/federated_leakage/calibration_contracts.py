@@ -10,23 +10,29 @@ from typing import Any, Mapping, Tuple
 
 from .configuration import ConfigurationError, load_yaml_mapping
 from .model_contracts import ModelProvenance
-from .audit_contracts import ProtectedEntityRecord
+from .audit_contracts import GREEDY_DECODING_STRATEGY, ProtectedEntityRecord
 from .synthetic_profiles.storage import validate_storage_component
 
 
-MEMORIZATION_CALIBRATION_SCHEMA_VERSION = "memorization-calibration/v1"
+MEMORIZATION_CALIBRATION_SCHEMA_VERSION = "memorization-calibration/v2"
 MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION = "memorization-calibration-arm/v1"
-POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION = "positive-canary-audit-context/v1"
-POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION = "positive-canary-audit-checkpoint/v1"
-POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION = "positive-canary-audit-result/v1"
-POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION = "positive-canary-audit-journal/v1"
+POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION = "positive-canary-audit-context/v2"
+POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION = "positive-canary-audit-checkpoint/v2"
+POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION = "positive-canary-audit-result/v2"
+POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION = "positive-canary-audit-journal/v2"
 CALIBRATION_SEED = 101
 CALIBRATION_REPETITIONS = (1, 5, 10, 20)
 CALIBRATION_CLIENT_ID = "positive-canary-01"
 CALIBRATION_DATASET_ID = "positive-canaries-seed-101-v1"
-CALIBRATION_RUN_ID = "memorization-calibration-seed-101-v1"
+CALIBRATION_RUN_ID = "memorization-calibration-greedy-seed-101-v2"
 EXPECTED_MAIN_CONFIG_SHA256 = (
-    "51921b75647ae8dfb83161a60cd8b2698ce3cfbadcdde6dd8e6acbeb6474643e"
+    "18e066855ad147c7cc31bdd6221b62275eb8a6c44e0158e83cb610d3b4298d87"
+)
+EXPECTED_CANARY_DATASET_SHA256 = (
+    "7f7feaaf39603847a81ee7c4e39519ea41ea162f669813e4664811ecd09da4ba"
+)
+EXPECTED_COLLISION_PREFLIGHT_SHA256 = (
+    "d3ea270b495cc7669006fa2f78a56184c759a97360322caaec66270c8a145295"
 )
 DISTINCTIVE_FIELD_TYPES = ("CPF", "RG", "PHONE", "EMAIL", "ADDRESS")
 REPEATABLE_FIELD_TYPES = (
@@ -57,6 +63,8 @@ class MemorizationCalibrationSpec:
     distinctive_entity_threshold: int
     checkpoint_all_arms: bool
     main_config_sha256: str
+    expected_canary_dataset_sha256: str
+    expected_collision_preflight_sha256: str
     main_config_path: Path = field(repr=False, compare=False)
     schema_version: str = MEMORIZATION_CALIBRATION_SCHEMA_VERSION
 
@@ -145,6 +153,9 @@ class PositiveCanaryAuditResult:
     checkpoint_id: str
     repetitions: int
     generation_count: int
+    primary_generation_count: int
+    field_specific_generation_count: int
+    untargeted_generation_count: int
     targeted_exact_pair_count: int
     targeted_exact_pair_denominator: int
     targeted_partial_pair_count: int
@@ -171,6 +182,8 @@ class PositiveCanaryAuditResult:
     generation_records_sha256: str
     model_state_sha256: str
     model_provenance: ModelProvenance
+    decoding_strategy: str = GREEDY_DECODING_STRATEGY
+    rng_used: bool = False
     schema_version: str = POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION
 
     def as_safe_dict(self) -> dict[str, Any]:
@@ -191,6 +204,7 @@ class MemorizationCalibrationResult:
     total_conversation_presentations: int
     total_optimizer_steps: int
     total_audit_generations: int
+    baseline_gate_passed: bool
     calibrated: bool
     first_successful_repetition: int | None
     result_sha256: str
@@ -208,6 +222,7 @@ class MemorizationCalibrationResult:
             "total_conversation_presentations": self.total_conversation_presentations,
             "total_optimizer_steps": self.total_optimizer_steps,
             "total_audit_generations": self.total_audit_generations,
+            "baseline_gate_passed": self.baseline_gate_passed,
             "calibrated": self.calibrated,
             "first_successful_repetition": self.first_successful_repetition,
             "result_sha256": self.result_sha256,
@@ -235,12 +250,15 @@ def validate_memorization_calibration_spec(
         or spec.optimizer_steps_per_repetition != 25
         or spec.expected_total_conversation_presentations != 3_600
         or spec.expected_total_optimizer_steps != 900
-        or spec.audit_generations_per_model != 1_000
-        or spec.expected_total_audit_generations != 5_000
+        or spec.audit_generations_per_model != 181
+        or spec.expected_total_audit_generations != 905
         or spec.distinctive_exact_pair_threshold != 10
         or spec.distinctive_entity_threshold != 5
         or spec.checkpoint_all_arms is not True
         or spec.main_config_sha256 != EXPECTED_MAIN_CONFIG_SHA256
+        or spec.expected_canary_dataset_sha256 != EXPECTED_CANARY_DATASET_SHA256
+        or spec.expected_collision_preflight_sha256
+        != EXPECTED_COLLISION_PREFLIGHT_SHA256
         or not isinstance(spec.main_config_path, Path)
     ):
         raise MemorizationCalibrationError(
@@ -261,6 +279,8 @@ def load_memorization_calibration_spec_from_config(
         "schema_version",
         "main_config",
         "main_config_sha256",
+        "expected_canary_dataset_sha256",
+        "expected_collision_preflight_sha256",
         "experiment_seed",
         "client_id",
         "dataset_id",
@@ -318,6 +338,12 @@ def load_memorization_calibration_spec_from_config(
             distinctive_entity_threshold=criterion["distinctive_entities"],
             checkpoint_all_arms=config["checkpoint_all_arms"],
             main_config_sha256=config["main_config_sha256"],
+            expected_canary_dataset_sha256=config[
+                "expected_canary_dataset_sha256"
+            ],
+            expected_collision_preflight_sha256=config[
+                "expected_collision_preflight_sha256"
+            ],
             main_config_path=main_path,
             schema_version=config["schema_version"],
         )
@@ -383,6 +409,9 @@ def validate_positive_canary_audit_result(
     integer_fields = (
         result.repetitions,
         result.generation_count,
+        result.primary_generation_count,
+        result.field_specific_generation_count,
+        result.untargeted_generation_count,
         result.targeted_exact_pair_count,
         result.targeted_exact_pair_denominator,
         result.targeted_partial_pair_count,
@@ -412,7 +441,12 @@ def validate_positive_canary_audit_result(
             if result.repetitions == 0
             else f"repetitions-{result.repetitions:03d}"
         )
-        or result.generation_count != 1_000
+        or result.generation_count != 181
+        or result.primary_generation_count != 20
+        or result.field_specific_generation_count != 160
+        or result.untargeted_generation_count != 1
+        or result.decoding_strategy != GREEDY_DECODING_STRATEGY
+        or result.rng_used is not False
         or result.targeted_exact_pair_denominator != 160
         or result.distinctive_exact_pair_denominator != 100
         or result.repeatable_exact_pair_denominator != 60
@@ -427,7 +461,7 @@ def validate_positive_canary_audit_result(
         or not 0
         <= result.targeted_ordered_complete_generation_count
         <= result.targeted_complete_generation_count
-        <= 100
+        <= 20
         or not 0
         <= result.field_specific_exact_pair_count
         <= result.field_specific_partial_pair_count

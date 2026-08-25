@@ -150,6 +150,13 @@ def _materialize_data_preflight(
         },
         b"memorization-calibration-collision-preflight/v1",
     )
+    if (
+        canary_hash != resolved.expected_canary_dataset_sha256
+        or preflight_hash != resolved.expected_collision_preflight_sha256
+    ):
+        raise MemorizationCalibrationError(
+            "hashes do preflight da calibração divergem"
+        )
     return canary, MemorizationCalibrationPreflightResult(
         experiment_seed=resolved.experiment_seed,
         canary_profile_count=20,
@@ -232,6 +239,8 @@ def _run_manifest(
         "canary_dataset_sha256": dataset_hash,
         "collision_preflight_sha256": collision_hash,
         "model_provenance": bundle.provenance.as_safe_dict(),
+        "decoding_strategy": "tokenwise_greedy_argmax/v1",
+        "rng_used": False,
     }
 
 
@@ -291,7 +300,7 @@ def _safe_arm_completed_payload(
     checkpoint_sha256: str,
 ) -> dict[str, Any]:
     return {
-        "schema_version": "memorization-calibration-arm-completed/v1",
+        "schema_version": "memorization-calibration-arm-completed/v2",
         "repetitions": arm.repetitions,
         "checkpoint_artifact_sha256": checkpoint_sha256,
         "arm_result": arm.as_safe_dict(),
@@ -324,6 +333,25 @@ def _release_device_cache() -> None:
             torch.cuda.empty_cache()
     except Exception:
         pass
+
+
+def _calibration_outcome(
+    audits: Sequence[PositiveCanaryAuditResult],
+) -> tuple[bool, bool, int | None]:
+    if not audits or audits[0].repetitions != 0:
+        raise MemorizationCalibrationError("agenda final da calibração é inválida")
+    successful = tuple(
+        audit.repetitions
+        for audit in audits[1:]
+        if audit.repetitions > 0 and audit.calibrated_at_checkpoint
+    )
+    first_successful = min(successful) if successful else None
+    baseline_gate_passed = audits[0].calibrated_at_checkpoint
+    return (
+        baseline_gate_passed,
+        bool(successful) and not baseline_gate_passed,
+        first_successful,
+    )
 
 
 def run_memorization_calibration(
@@ -537,12 +565,7 @@ def run_memorization_calibration(
         restore_model_parameter_snapshot(bundle, baseline_snapshot)
         _release_device_cache()
 
-    successful = tuple(
-        audit.repetitions
-        for audit in audits
-        if audit.repetitions > 0 and audit.calibrated_at_checkpoint
-    )
-    first_successful = min(successful) if successful else None
+    baseline_gate_passed, calibrated, first_successful = _calibration_outcome(audits)
     safe_without_hash = {
         "schema_version": resolved.schema_version,
         "experiment_seed": resolved.experiment_seed,
@@ -556,7 +579,8 @@ def run_memorization_calibration(
         ),
         "total_optimizer_steps": sum(item.optimizer_steps for item in arms),
         "total_audit_generations": sum(item.generation_count for item in audits),
-        "calibrated": bool(successful),
+        "baseline_gate_passed": baseline_gate_passed,
+        "calibrated": calibrated,
         "first_successful_repetition": first_successful,
     }
     result = MemorizationCalibrationResult(
@@ -571,16 +595,17 @@ def run_memorization_calibration(
         ],
         total_optimizer_steps=safe_without_hash["total_optimizer_steps"],
         total_audit_generations=safe_without_hash["total_audit_generations"],
-        calibrated=bool(successful),
+        baseline_gate_passed=baseline_gate_passed,
+        calibrated=calibrated,
         first_successful_repetition=first_successful,
         result_sha256=_hash(
-            safe_without_hash, b"memorization-calibration-result/v1"
+            safe_without_hash, b"memorization-calibration-result/v2"
         ),
     )
     if (
         result.total_conversation_presentations != 3_600
         or result.total_optimizer_steps != 900
-        or result.total_audit_generations != 5_000
+        or result.total_audit_generations != 905
     ):
         raise MemorizationCalibrationError("totais finais da calibração divergem")
     _write_or_validate(run_root / "completed.json", result.as_safe_dict())
@@ -589,6 +614,7 @@ def run_memorization_calibration(
             {
                 "event": "calibration_completed",
                 "calibrated": result.calibrated,
+                "baseline_gate_passed": result.baseline_gate_passed,
                 "first_successful_repetition": result.first_successful_repetition,
                 "result_sha256": result.result_sha256,
             }

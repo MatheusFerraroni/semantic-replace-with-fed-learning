@@ -15,7 +15,8 @@ A campanha principal e as defesas continuam pendentes.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
-- [Configuração da campanha principal](configs/main-v1.yaml)
+- [Configuração oficial greedy da campanha](configs/main-v2.yaml)
+- [Configuração sampling v1 (histórica, somente leitura)](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
 - [Orquestrador retomável do piloto](docs/pilot-orchestrator.md)
@@ -182,15 +183,18 @@ processo e permanecem exclusivos do avaliador.
 
 O núcleo executável aceita orçamentos aninhados de 1, 5, 20 ou 200 participantes.
 O orçamento de referência usa 20 alvos, exatamente dois por cliente, e executa
-100 consultas de perfil completo, 800 consultas por campo e 100 consultas sem
-nome. As mesmas seleções, instruções e sementes por entidade são reutilizadas
-entre orçamento, cenário, rodada e `k`. Antes da geração, o avaliador confirma
+20 consultas de perfil completo, 160 consultas por campo e uma consulta sem
+nome, totalizando 181 gerações. A inferência é exclusivamente greedy token a
+token (`do_sample=false`, um beam e uma sequência): cada passo escolhe o token
+condicional mais provável, sem procurar a sequência globalmente mais provável.
+As mesmas seleções e instruções são reutilizadas entre orçamento, cenário,
+rodada e `k`; a inferência não recebe seed nem consome RNG. Antes da geração, o avaliador confirma
 com o tokenizador real que o prefixo é idêntico ao usado no treinamento e que
 nenhuma resposta esperada precisa de truncamento.
 
 O avaliador verifica o fingerprint do modelo antes e depois de cada auditoria,
 usa apenas a continuação decodificada para pontuação e restaura modo do modelo,
-RNG e opções determinísticas. Resultados brutos permanecem em
+estado RNG e opções determinísticas. Resultados brutos permanecem em
 `outputs/runs/<run_id>/evaluator/private/`; somente contagens, métricas, hashes e
 proveniência entram no resumo em `evaluator/summaries/`. Ambos permanecem fora
 do Git e nenhum deles é devolvido a clientes, servidor ou adversário.
@@ -213,7 +217,7 @@ tokenizador antes de terminar:
 
 ```bash
 python -m federated_leakage.prepare_model \
-  --config configs/main-v1.yaml
+  --config configs/main-v2.yaml
 ```
 
 O cache padrão é `artifacts/huggingface/`, permanece fora do Git e pode ser
@@ -222,7 +226,7 @@ mesmo preflight pode ser repetido sem permitir rede:
 
 ```bash
 python -m federated_leakage.prepare_model \
-  --config configs/main-v1.yaml \
+  --config configs/main-v2.yaml \
   --offline
 ```
 
@@ -313,11 +317,16 @@ ao orquestrador do piloto.
 
 ## Executar ou retomar o piloto B0/F0/F1
 
-O piloto fixado usa seed `101`, `k=1`, audita B0 uma vez, percorre F0 por 20
+Antes do piloto, a ordem obrigatória é: preflight da calibração v2, calibração
+completa, revisão de `calibrated=true` com baseline reprovado, preflight do
+piloto e só então piloto completo. Se o gate falhar, pare; não aumente doses ou
+altere a receita sem criar um protocolo versionado.
+
+O piloto greedy v2 usa seed `101`, `k=1`, audita B0 uma vez, percorre F0 por 20
 rodadas, recarrega o baseline e percorre F1 por 20 rodadas. O orçamento de 20
 alvos é auditado em todos os 41 checkpoints; 1, 5 e 200 alvos são adicionados em
 B0 e na rodada 20 de cada trajetória. O total é de 44.000 conversas, 11.000
-passos locais e 69.710 gerações. F0 e F1 compartilham o baseline somente na
+passos locais e 12.992 gerações. F0 e F1 compartilham o baseline somente na
 rodada 1; depois, cada trajetória continua de seu próprio modelo final anterior,
 mantendo pareados os dados, pesos, seeds e demais controles experimentais.
 
@@ -336,7 +345,7 @@ sem escrever saídas:
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_pilot \
-  --config configs/main-v1.yaml \
+  --config configs/main-v2.yaml \
   --device cuda \
   --preflight-only
 ```
@@ -347,11 +356,14 @@ Para executar ou retomar:
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_pilot \
-  --config configs/main-v1.yaml \
+  --config configs/main-v2.yaml \
   --device cuda
 ```
 
-O destino padrão é `outputs/`, com `run_id` `pilot-seed-101-k01`. Também são
+O destino padrão é `outputs/`, com `run_id`
+`pilot-greedy-seed-101-k01-v2`. O piloto só começa depois de validar o marcador
+concluído e aprovado da calibração greedy v2; o baseline não pode atingir o
+próprio gate. Também são
 aceitos `--cache-dir`, `--model-artifact-dir`, `--output-root` e `--run-id`.
 `--fresh` recusa uma execução já existente; sem ele, artefatos compatíveis são
 revalidados e a execução continua do último checkpoint confirmado. Não existe
@@ -381,7 +393,7 @@ sbatch scripts/run_pilot_l40s.sbatch resume
 ```
 
 `preflight` não escreve artefatos científicos. `start` usa `--fresh` e recusa
-um diretório `outputs/runs/pilot-seed-101-k01` existente. `resume` exige esse
+um diretório `outputs/runs/pilot-greedy-seed-101-k01-v2` existente. `resume` exige esse
 diretório, revalida seus artefatos e continua o mesmo `run_id`. O launcher
 reserva uma L40S, 8 CPUs, 64 GiB e 24 horas, usa `.venv/bin/python`, mantém o
 modelo offline e exporta o contrato do cuBLAS antes do Python. A dependência
@@ -398,7 +410,7 @@ ou reproduz a rodada incompleta.
 A calibração é independente do piloto finalizado. Ela gera 20 perfis-canário
 disjuntos, treina quatro braços partindo do mesmo baseline com 1, 5, 10 e 20
 repetições do bundle de 100 conversas e audita o baseline e os quatro modelos.
-São 3.600 apresentações, 900 passos AdamW e 5.000 gerações no total.
+São 3.600 apresentações, 900 passos AdamW e 905 gerações greedy no total.
 
 Valide primeiro, sem escrever:
 
@@ -406,7 +418,7 @@ Valide primeiro, sem escrever:
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_memorization_calibration \
-  --config configs/memorization-calibration-v1.yaml \
+  --config configs/memorization-calibration-v2.yaml \
   --device cuda \
   --preflight-only
 ```
@@ -419,10 +431,11 @@ sbatch scripts/run_memorization_calibration_l40s.sbatch start
 sbatch scripts/run_memorization_calibration_l40s.sbatch resume
 ```
 
-`start` cria uma execução nova e `resume` revalida braços, checkpoints e
-auditorias já publicados. A calibração termina validamente mesmo quando o limiar
-não é alcançado; nesse caso, `calibrated=false` bloqueia o desenvolvimento das
-defesas até uma nova decisão de protocolo. Consulte
+`start` cria `memorization-calibration-greedy-seed-101-v2`; `resume` revalida
+braços, checkpoints e auditorias já publicados. A calibração só libera o piloto
+quando algum braço atinge o limiar e o baseline não. Caso contrário,
+`calibrated=false` bloqueia o piloto e o desenvolvimento das defesas até uma
+nova decisão de protocolo. Consulte
 [`docs/memorization-calibration.md`](docs/memorization-calibration.md).
 
 ## Gerar um dataset para inspeção

@@ -1,4 +1,6 @@
 import io
+import subprocess
+import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -22,20 +24,44 @@ def _preflight():
         paired_schedule_sha256="3" * 64,
         model_state_sha256="4" * 64,
         tokenization_validated=True,
+        calibration_result_sha256="5" * 64,
+        calibration_manifest_sha256="6" * 64,
     )
 
 
 class RunPilotCliTests(unittest.TestCase):
+    def test_module_help_has_no_runtime_warning(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-W",
+                "error::RuntimeWarning",
+                "-m",
+                "federated_leakage.run_pilot",
+                "--help",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_preflight_cli_passes_strict_operational_arguments(self):
         output = io.StringIO()
         with mock.patch(
             "federated_leakage.run_pilot.run_paired_pilot",
             return_value=_preflight(),
-        ) as runner, redirect_stdout(output):
+        ) as runner, mock.patch(
+            "federated_leakage.run_pilot.load_completed_calibration_gate",
+            return_value=mock.Mock(
+                result_sha256="5" * 64,
+                manifest_sha256="6" * 64,
+            ),
+        ), redirect_stdout(output):
             status = main(
                 [
                     "--config",
-                    "configs/main-v1.yaml",
+                    "configs/main-v2.yaml",
                     "--device",
                     "cpu",
                     "--preflight-only",
@@ -60,11 +86,17 @@ class RunPilotCliTests(unittest.TestCase):
         with mock.patch(
             "federated_leakage.run_pilot.run_paired_pilot",
             side_effect=RuntimeError("segredo-nao-expor"),
+        ), mock.patch(
+            "federated_leakage.run_pilot.load_completed_calibration_gate",
+            return_value=mock.Mock(
+                result_sha256="5" * 64,
+                manifest_sha256="6" * 64,
+            ),
         ), redirect_stderr(error):
             status = main(
                 [
                     "--config",
-                    "configs/main-v1.yaml",
+                    "configs/main-v2.yaml",
                     "--device",
                     "cpu",
                 ]

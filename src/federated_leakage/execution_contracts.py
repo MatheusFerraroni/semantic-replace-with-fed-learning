@@ -15,9 +15,9 @@ from .synthetic_profiles.model import GENERATOR_VERSION
 from .synthetic_profiles.storage import validate_storage_component
 
 
-PILOT_EXECUTION_SCHEMA_VERSION = "pilot-execution/v1"
-FEDERATED_TRAJECTORY_SCHEMA_VERSION = "federated-trajectory/v1"
-FEDERATED_CHECKPOINT_SCHEMA_VERSION = "federated-checkpoint/v1"
+PILOT_EXECUTION_SCHEMA_VERSION = "pilot-execution/v2"
+FEDERATED_TRAJECTORY_SCHEMA_VERSION = "federated-trajectory/v2"
+FEDERATED_CHECKPOINT_SCHEMA_VERSION = "federated-checkpoint/v2"
 PILOT_DEVELOPMENT_SEED = 101
 PILOT_AUXILIARY_WEIGHT_UNITS = 1
 PILOT_SCHEDULE_ID = "F0-F1"
@@ -25,7 +25,8 @@ PILOT_ROUNDS = 20
 PILOT_TARGET_COUNTS = (1, 5, 20, 200)
 PILOT_REFERENCE_TARGET_COUNT = 20
 PILOT_SENSITIVITY_TARGET_COUNTS = (1, 5, 200)
-PILOT_EXPECTED_GENERATION_COUNT = 69_710
+PILOT_EXPECTED_GENERATION_COUNT = 12_992
+PILOT_CALIBRATION_RUN_ID = "memorization-calibration-greedy-seed-101-v2"
 
 TrajectoryScenario = Literal["F0", "F1"]
 
@@ -51,6 +52,11 @@ class PilotExecutionSpec:
     expected_generation_count: int
     config_sha256: str
     freeze_requires_human_review: bool
+    calibration_run_id: str
+    calibration_schema_version: str
+    calibration_decoding_strategy: str
+    calibration_canary_dataset_sha256: str
+    calibration_collision_preflight_sha256: str
     schema_version: str = PILOT_EXECUTION_SCHEMA_VERSION
     trajectory_schema_version: str = FEDERATED_TRAJECTORY_SCHEMA_VERSION
     checkpoint_schema_version: str = FEDERATED_CHECKPOINT_SCHEMA_VERSION
@@ -64,6 +70,8 @@ class PilotRunIdentity:
     auxiliary_weight_units: int
     schedule_id: str
     config_sha256: str
+    calibration_result_sha256: str
+    calibration_manifest_sha256: str
     schema_version: str = PILOT_EXECUTION_SCHEMA_VERSION
 
     def as_safe_dict(self) -> dict[str, Any]:
@@ -85,6 +93,8 @@ class PilotPreflightResult:
     model_state_sha256: str | None = None
     tokenization_validated: bool = False
     audit_target_counts: Tuple[int, ...] = PILOT_TARGET_COUNTS
+    calibration_result_sha256: str | None = None
+    calibration_manifest_sha256: str | None = None
     schema_version: str = PILOT_EXECUTION_SCHEMA_VERSION
 
     def as_safe_dict(self) -> dict[str, Any]:
@@ -249,6 +259,13 @@ def validate_pilot_execution_spec(spec: object) -> PilotExecutionSpec:
         or spec.expected_generation_count != PILOT_EXPECTED_GENERATION_COUNT
         or not _is_sha256(spec.config_sha256)
         or spec.freeze_requires_human_review is not True
+        or spec.calibration_run_id != PILOT_CALIBRATION_RUN_ID
+        or spec.calibration_schema_version != "memorization-calibration/v2"
+        or spec.calibration_decoding_strategy != "tokenwise_greedy_argmax/v1"
+        or spec.calibration_canary_dataset_sha256
+        != "7f7feaaf39603847a81ee7c4e39519ea41ea162f669813e4664811ecd09da4ba"
+        or spec.calibration_collision_preflight_sha256
+        != "d3ea270b495cc7669006fa2f78a56184c759a97360322caaec66270c8a145295"
     ):
         raise PilotExecutionError("especificação do piloto diverge do protocolo")
     return spec
@@ -261,7 +278,7 @@ def parse_pilot_execution_spec(
 ) -> PilotExecutionSpec:
     if not isinstance(config, Mapping):
         raise PilotExecutionError("configuração do piloto deve ser mapeada")
-    if config.get("schema_version") != "federated-leakage/main-config/v1":
+    if config.get("schema_version") != "federated-leakage/main-config/v2":
         raise PilotExecutionError("schema da configuração principal é incompatível")
     pilot = _mapping(config, "pilot")
     checkpoints = _mapping(config, "checkpoints")
@@ -291,6 +308,16 @@ def parse_pilot_execution_spec(
         "scenarios": ["B0", "F0", "F1"],
         "freeze_reference_recipe_after_pilot": True,
         "freeze_requires_human_review": True,
+        "calibration_gate": {
+            "required": True,
+            "run_id": PILOT_CALIBRATION_RUN_ID,
+            "schema_version": "memorization-calibration/v2",
+            "decoding_strategy": "tokenwise_greedy_argmax/v1",
+            "canary_dataset_sha256": "7f7feaaf39603847a81ee7c4e39519ea41ea162f669813e4664811ecd09da4ba",
+            "collision_preflight_sha256": "d3ea270b495cc7669006fa2f78a56184c759a97360322caaec66270c8a145295",
+            "require_calibrated": True,
+            "require_baseline_gate_passed": False,
+        },
     }
     if frozenset(pilot) != frozenset(required):
         raise PilotExecutionError("seção pilot possui chaves desconhecidas")
@@ -347,6 +374,15 @@ def parse_pilot_execution_spec(
             expected_generation_count=PILOT_EXPECTED_GENERATION_COUNT,
             config_sha256=config_sha256,
             freeze_requires_human_review=True,
+            calibration_run_id=PILOT_CALIBRATION_RUN_ID,
+            calibration_schema_version="memorization-calibration/v2",
+            calibration_decoding_strategy="tokenwise_greedy_argmax/v1",
+            calibration_canary_dataset_sha256=(
+                "7f7feaaf39603847a81ee7c4e39519ea41ea162f669813e4664811ecd09da4ba"
+            ),
+            calibration_collision_preflight_sha256=(
+                "d3ea270b495cc7669006fa2f78a56184c759a97360322caaec66270c8a145295"
+            ),
         )
     )
 
@@ -368,11 +404,13 @@ def build_pilot_run_identity(
     spec: PilotExecutionSpec,
     *,
     run_id: str | None = None,
+    calibration_result_sha256: str,
+    calibration_manifest_sha256: str,
 ) -> PilotRunIdentity:
     resolved = validate_pilot_execution_spec(spec)
     try:
         safe_run_id = validate_storage_component(
-            run_id or "pilot-seed-101-k01",
+            run_id or "pilot-greedy-seed-101-k01-v2",
             "run_id",
         )
         version = GENERATOR_VERSION.rsplit("/", 1)[-1]
@@ -382,6 +420,10 @@ def build_pilot_run_identity(
         )
     except Exception as error:
         raise PilotExecutionError("identidade do piloto é inválida") from error
+    if not _is_sha256(calibration_result_sha256):
+        raise PilotExecutionError("gate da calibração possui hash inválido")
+    if not _is_sha256(calibration_manifest_sha256):
+        raise PilotExecutionError("manifesto da calibração possui hash inválido")
     return PilotRunIdentity(
         run_id=safe_run_id,
         dataset_id=dataset_id,
@@ -389,6 +431,8 @@ def build_pilot_run_identity(
         auxiliary_weight_units=resolved.auxiliary_weight_units,
         schedule_id=resolved.schedule_id,
         config_sha256=resolved.config_sha256,
+        calibration_result_sha256=calibration_result_sha256,
+        calibration_manifest_sha256=calibration_manifest_sha256,
     )
 
 

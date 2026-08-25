@@ -48,7 +48,6 @@ from .synthetic_profiles.rendering import (
     CANONICAL_COMPLETION_TEMPLATE,
     CANONICAL_PREFIX_TEMPLATE,
 )
-from .synthetic_profiles.seeding import derive_integer, derive_seed_material
 from .synthetic_profiles.validation import validate_positive_canary_dataset
 from .trusted_evaluator import (
     _AuditQuery,
@@ -176,11 +175,6 @@ def _query_schedule(
     spec: AuditSpec,
     context: PositiveCanaryEvaluatorContext,
 ) -> Tuple[_AuditQuery, ...]:
-    seed_material = derive_seed_material(
-        context.experiment_seed,
-        namespace="positive-canary-evaluator",
-        schedule_id="generation-schedule/v1",
-    )
     queries: list[_AuditQuery] = []
 
     def append(
@@ -188,20 +182,11 @@ def _query_schedule(
         *,
         target_index: int | None,
         field_type: str | None,
-        replicate_index: int,
         max_new_tokens: int,
         prompt: str,
     ) -> None:
         index = len(queries)
         target = context.registry[target_index] if target_index is not None else None
-        stable_target = target.entity_id if target is not None else "none"
-        generation_seed = derive_integer(
-            seed_material,
-            mode,
-            stable_target,
-            field_type or "none",
-            replicate_index,
-        ) % (2**63)
         queries.append(
             _AuditQuery(
                 query_index=index,
@@ -209,8 +194,6 @@ def _query_schedule(
                 target_index=target_index,
                 target_entity_id=target.entity_id if target is not None else None,
                 field_type=field_type,
-                replicate_index=replicate_index,
-                generation_seed=generation_seed,
                 max_new_tokens=max_new_tokens,
                 prompt=prompt,
             )
@@ -220,40 +203,34 @@ def _query_schedule(
         prompt = CANONICAL_PREFIX_TEMPLATE.format(
             PERSON_NAME=target.value("PERSON_NAME")
         )
-        for replicate in range(spec.generation_seeds_per_target):
-            append(
-                "primary",
-                target_index=target_index,
-                field_type=None,
-                replicate_index=replicate,
-                max_new_tokens=spec.primary_max_new_tokens,
-                prompt=prompt,
-            )
+        append(
+            "primary",
+            target_index=target_index,
+            field_type=None,
+            max_new_tokens=spec.primary_max_new_tokens,
+            prompt=prompt,
+        )
     for target_index, target in enumerate(context.registry):
         for field_type in TARGET_FIELD_TYPES:
             prompt = FIELD_SPECIFIC_PROMPT_TEMPLATES[field_type].format(
                 PERSON_NAME=target.value("PERSON_NAME")
             )
-            for replicate in range(spec.field_generations_per_pair):
-                append(
-                    "field_specific",
-                    target_index=target_index,
-                    field_type=field_type,
-                    replicate_index=replicate,
-                    max_new_tokens=spec.field_max_new_tokens,
-                    prompt=prompt,
-                )
-    for replicate in range(spec.untargeted_generations):
-        append(
-            "untargeted",
-            target_index=None,
-            field_type=None,
-            replicate_index=replicate,
-            max_new_tokens=spec.untargeted_max_new_tokens,
-            prompt=UNTARGETED_PROMPT,
-        )
-    if len(queries) != 1_000:
-        raise MemorizationCalibrationError("agenda canária não possui 1.000 consultas")
+            append(
+                "field_specific",
+                target_index=target_index,
+                field_type=field_type,
+                max_new_tokens=spec.field_max_new_tokens,
+                prompt=prompt,
+            )
+    append(
+        "untargeted",
+        target_index=None,
+        field_type=None,
+        max_new_tokens=spec.untargeted_max_new_tokens,
+        prompt=UNTARGETED_PROMPT,
+    )
+    if len(queries) != 181:
+        raise MemorizationCalibrationError("agenda canária não possui 181 consultas")
     return tuple(queries)
 
 
@@ -261,17 +238,15 @@ def _query_schedule_hash(queries: Sequence[_AuditQuery]) -> str:
     payload = [
         {
             "field_type": item.field_type,
-            "generation_seed": item.generation_seed,
             "max_new_tokens": item.max_new_tokens,
             "mode": item.mode,
             "prompt_sha256": _sha256(item.prompt.encode("utf-8")),
             "query_index": item.query_index,
-            "replicate_index": item.replicate_index,
             "target_index": item.target_index,
         }
         for item in queries
     ]
-    return _sha256(b"positive-canary-audit-schedule/v1\0" + _canonical_json_bytes(payload))
+    return _sha256(b"positive-canary-audit-schedule/v2\0" + _canonical_json_bytes(payload))
 
 
 def preflight_positive_canary_audit(
@@ -348,11 +323,9 @@ def score_positive_canary_audit(
             or record.target_index != query.target_index
             or record.target_entity_id != query.target_entity_id
             or record.field_type != query.field_type
-            or record.replicate_index != query.replicate_index
-            or record.generation_seed != query.generation_seed
             or record.max_new_tokens != query.max_new_tokens
             or record.prompt != query.prompt
-            or record.schema_version != "extraction-audit-record/v1"
+            or record.schema_version != "extraction-audit-record/v2"
             or record.finish_reason not in {"eos", "max_tokens"}
             or not isinstance(record.generated_text, str)
         ):
@@ -462,7 +435,10 @@ def score_positive_canary_audit(
     return validate_positive_canary_audit_result(PositiveCanaryAuditResult(
         checkpoint_id=checkpoint.checkpoint_id,
         repetitions=checkpoint.repetitions,
-        generation_count=1_000,
+        generation_count=181,
+        primary_generation_count=20,
+        field_specific_generation_count=160,
+        untargeted_generation_count=1,
         targeted_exact_pair_count=len(exact_pairs),
         targeted_exact_pair_denominator=160,
         targeted_partial_pair_count=len(partial_pairs),
@@ -500,8 +476,6 @@ def _generation_payload(record: AuditGenerationRecord) -> dict[str, Any]:
         "target_index": record.target_index,
         "target_entity_id": record.target_entity_id,
         "field_type": record.field_type,
-        "replicate_index": record.replicate_index,
-        "generation_seed": record.generation_seed,
         "max_new_tokens": record.max_new_tokens,
         "finish_reason": record.finish_reason,
         "prompt": record.prompt,
@@ -572,7 +546,7 @@ def _load_records(
 
 def _audit_spec_sha256(spec: AuditSpec) -> str:
     return _sha256(
-        b"positive-canary-audit-spec/v1\0" + _canonical_json_bytes(asdict(spec))
+        b"positive-canary-audit-spec/v2\0" + _canonical_json_bytes(asdict(spec))
     )
 
 
@@ -603,7 +577,9 @@ def _expected_audit_metadata(
         "prompt_catalog_sha256": context.prompt_catalog_sha256,
         "generation_schedule_sha256": generation_schedule_sha256,
         "audit_spec_sha256": _audit_spec_sha256(spec),
-        "expected_generation_count": 1_000,
+        "decoding_strategy": spec.generation.strategy,
+        "rng_used": spec.generation.rng_used,
+        "expected_generation_count": 181,
     }
 
 
@@ -672,14 +648,12 @@ def _publish_or_validate_summary(
 
 def _record_matches_query(record: AuditGenerationRecord, query: _AuditQuery) -> bool:
     return (
-        record.schema_version == "extraction-audit-record/v1"
+        record.schema_version == "extraction-audit-record/v2"
         and record.query_index == query.query_index
         and record.mode == query.mode
         and record.target_index == query.target_index
         and record.target_entity_id == query.target_entity_id
         and record.field_type == query.field_type
-        and record.replicate_index == query.replicate_index
-        and record.generation_seed == query.generation_seed
         and record.max_new_tokens == query.max_new_tokens
         and record.prompt == query.prompt
         and record.finish_reason in {"eos", "max_tokens"}
@@ -704,7 +678,7 @@ def run_positive_canary_audit(
     output_root: Path,
     resume: bool = True,
 ) -> PositiveCanaryAuditResult:
-    """Executa ou retoma as 1.000 gerações privadas de um checkpoint canário."""
+    """Executa ou retoma as 181 gerações greedy de um checkpoint canário."""
 
     if not isinstance(model_bundle, LoadedModelBundle):
         raise MemorizationCalibrationError("bundle do avaliador canário é incompatível")

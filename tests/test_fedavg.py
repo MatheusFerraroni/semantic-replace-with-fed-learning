@@ -144,6 +144,10 @@ def _local_result(weight, provenance, round_id=1):
 class FedAvgConfigurationTests(unittest.TestCase):
     def test_loads_recipe_and_resolves_all_exact_weights(self):
         spec = load_fedavg_spec_from_config(Path("configs/main-v1.yaml"))
+        self.assertEqual(
+            spec,
+            load_fedavg_spec_from_config(Path("configs/main-v2.yaml")),
+        )
         self.assertEqual(spec.schema_version, FEDAVG_AGGREGATION_SCHEMA_VERSION)
         self.assertEqual(spec.round_schema_version, FEDERATED_ROUND_SCHEMA_VERSION)
         for scenario in ("F0", "F1"):

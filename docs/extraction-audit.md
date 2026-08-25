@@ -10,21 +10,27 @@ seleciona exatamente dois por cliente; também são aceitos 1, 5 e 200 alvos.
 Nomes, valores e identificadores permanecem em objetos com representação
 redigida e nos artefatos privados do avaliador.
 
-Para `n` alvos, cada checkpoint produz `45n + 100` gerações:
+Para `n` alvos, cada checkpoint produz `9n + 1` gerações:
 
-- `5n` consultas direcionadas de perfil completo;
-- `40n` consultas específicas, cinco para cada par alvo-tipo;
-- 100 consultas sem nome.
+- `n` consultas direcionadas de perfil completo;
+- `8n` consultas específicas, uma para cada par alvo-tipo;
+- uma consulta sem nome.
 
-Assim, os orçamentos de 1, 5, 20 e 200 alvos produzem respectivamente 145, 325,
-1.000 e 9.100 gerações.
+Assim, os orçamentos de 1, 5, 20 e 200 alvos produzem respectivamente 10, 46,
+181 e 1.801 gerações.
+
+Cada chamada usa exatamente `do_sample=False`, `num_beams=1`,
+`num_return_sequences=1`, `repetition_penalty=1.0` e `use_cache=True`.
+`temperature`, `top_p` e `top_k` não pertencem à configuração v2 nem são
+enviados ao modelo. Greedy escolhe o argmax condicional em cada passo; isso não
+equivale a buscar a sequência completa de maior probabilidade.
 
 O catálogo de prompts `extraction-audit-prompt-catalog/v1` é a fonte de verdade.
 O prompt principal reutiliza `CANONICAL_PREFIX_TEMPLATE` e a continuação
-esperada reutiliza `CANONICAL_COMPLETION_TEMPLATE`. A seed das consultas deriva
-somente da seed do experimento, modo, identidade técnica estável do alvo, tipo e
-repetição. Cenário, rodada, `k`, orçamento e hash do modelo não entram nessa
-derivação.
+esperada reutiliza `CANONICAL_COMPLETION_TEMPLATE`. A seleção aninhada dos alvos
+continua derivada somente da seed do experimento. A geração é greedy token a
+token e não recebe seed, não chama `manual_seed` e não consome RNG. Cenário,
+rodada, `k`, orçamento e hash do modelo não alteram prompts compartilhados.
 
 ## Uso pelo orquestrador
 
@@ -42,7 +48,7 @@ from federated_leakage import (
     run_extraction_audit,
 )
 
-audit_spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+audit_spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
 evaluator = prepare_trusted_evaluator(
     victim_datasets,
     experiment_seed=101,
@@ -63,7 +69,7 @@ result = run_extraction_audit(
     checkpoint,
     model_bundle,
     output_root=Path("outputs/runs"),
-    run_id="pilot-seed-101-B0",
+    run_id="pilot-greedy-seed-101-B0-v2",
 )
 ```
 
@@ -77,7 +83,7 @@ conversas tokenizadas, deltas ou atualizações individuais.
 A pontuação considera somente o texto gerado depois do prompt. Correspondência
 exata aplica Unicode NFC, remove espaços externos e reduz sequências de espaços,
 sem alterar caixa, pontuação ou dígitos. A métrica principal deduplica os 160
-pares `alvo-tipo` entre as cinco gerações. Datas e horários compartilhados são
+pares `alvo-tipo` na única geração direcionada. Datas e horários compartilhados são
 atribuídos ao nome na consulta direcionada e deduplicados por `(tipo, valor)` na
 consulta sem nome.
 
@@ -107,14 +113,21 @@ diretório é selado e o resumo seguro é publicado. Uma auditoria concluída é
 relida e revalidada quando a mesma identidade é retomada; nunca é sobrescrita.
 O `audit_id` inclui `targets-001`, `targets-005`, `targets-020` ou `targets-200`.
 
-O JSONL privado contém prompts, gerações, seeds e identificadores técnicos. O
+O JSONL privado contém prompts, gerações e identificadores técnicos, mas não
+contém seeds nem índices de réplica. O
 resumo contém somente contexto do checkpoint, proveniência, contagens, métricas
 e hashes; ele não contém textos, valores, tokens, anotações ou `entity_id`. O
 servidor, clientes e adversário não recebem nenhum dos dois caminhos.
 
 ## Limites atuais
 
-O piloto B0/F0/F1 já invoca automaticamente a auditoria depois de cada uma das
+Os contratos ativos são `extraction-audit/v2`,
+`extraction-audit-record/v2`, `extraction-audit-result/v3` e
+`extraction-audit-journal/v3`, com
+`decoding_strategy=tokenwise_greedy_argmax/v1` e `rng_used=false`. Os leitores
+v1 existem apenas para inspeção histórica e nunca habilitam geração ou retomada.
+
+O piloto B0/F0/F1 invoca automaticamente a auditoria depois de cada uma das
 20 rodadas. Continuam fora deste contrato diagnósticos de perfis auxiliares,
 rank/NLL, controles negativos, utilidade, F2/F3 e métricas das substituições
 F4/F5. O controle positivo canário possui executor paralelo próprio, descrito em

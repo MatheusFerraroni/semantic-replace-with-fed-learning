@@ -83,9 +83,9 @@ class SlurmPilotLauncherTests(unittest.TestCase):
         fixed_values = (
             "readonly PILOT_SEED=101",
             "readonly PILOT_AUXILIARY_WEIGHT_UNITS=1",
-            "readonly PILOT_RUN_ID=pilot-seed-101-k01",
+            "readonly PILOT_RUN_ID=pilot-greedy-seed-101-k01-v2",
             "readonly PILOT_DEVICE=cuda",
-            "readonly PILOT_CONFIG=configs/main-v1.yaml",
+            "readonly PILOT_CONFIG=configs/main-v2.yaml",
             "readonly PILOT_CACHE=artifacts/huggingface",
             "readonly PILOT_OUTPUT_ROOT=outputs",
         )

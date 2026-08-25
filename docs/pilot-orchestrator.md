@@ -2,8 +2,12 @@
 
 ## Escopo implementado
 
+Este runner só é liberado depois de concluir e aprovar a calibração greedy v2.
+A ordem operacional é calibração preflight → calibração completa → revisão do
+gate → piloto preflight → piloto completo. Um gate negativo interrompe o fluxo.
+
 O comando `federated_leakage.run_pilot` executa exclusivamente o piloto de
-desenvolvimento não privado fixado em `configs/main-v1.yaml`:
+desenvolvimento não privado fixado em `configs/main-v2.yaml`:
 
 - seed `101` e agenda auxiliar `F0-F1`;
 - `k=1`, com peso `1/11` por vítima e `1/11` para o auxiliar;
@@ -13,8 +17,12 @@ desenvolvimento não privado fixado em `configs/main-v1.yaml`:
 - auditorias adicionais de 1, 5 e 200 alvos em B0 e na rodada 20.
 
 Isso totaliza 40 rodadas federadas, 44.000 conversas processadas, 11.000 passos
-locais e 69.710 gerações de auditoria. F2-F5, a varredura `k=1..10` e a campanha
+locais e 12.992 gerações de auditoria greedy. F2-F5, a varredura `k=1..10` e a campanha
 principal de 405 execuções não fazem parte deste comando.
+
+B0 usa 2.038 gerações: 181 para o orçamento de referência e 10, 46 e 1.801
+para as sensibilidades. Cada trajetória usa 5.477: 20 auditorias de 181, mais
+10, 46 e 1.801 na rodada 20. Orçamentos permanecem em artefatos separados.
 
 ## Contrato de determinismo CUDA
 
@@ -42,13 +50,18 @@ tokenizador real.
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_pilot \
-  --config configs/main-v1.yaml \
+  --config configs/main-v2.yaml \
   --device cuda \
   --preflight-only
 ```
 
 `--preflight-only` não cria datasets, diretórios da execução, auditorias ou
-checkpoints. O dispositivo solicitado deve existir; não há fallback para CPU.
+checkpoints. Antes dele, o runner exige o marcador concluído da calibração
+`memorization-calibration-greedy-seed-101-v2`: algum braço deve ter passado o
+gate e o baseline não. O resultado, manifesto, dataset canário, preflight de
+colisões, estratégia, baseline e proveniência devem coincidir com a configuração
+v2. O dispositivo solicitado deve existir; não há fallback
+para CPU.
 
 ## Execução e retomada
 
@@ -56,11 +69,11 @@ checkpoints. O dispositivo solicitado deve existir; não há fallback para CPU.
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_pilot \
-  --config configs/main-v1.yaml \
+  --config configs/main-v2.yaml \
   --device cuda
 ```
 
-O `run_id` padrão é `pilot-seed-101-k01`. Uma segunda chamada compatível retoma
+O `run_id` padrão é `pilot-greedy-seed-101-k01-v2`. Uma segunda chamada compatível retoma
 o último estado confirmado; se `completed.json` já existir, todos os artefatos
 necessários são relidos e revalidados sem repetir treinamento ou gerações.
 Ambas as trajetórias registram o fingerprint do mesmo baseline e o hash agregado
@@ -114,9 +127,9 @@ Somente para uma execução oficial já existente, retome com:
 sbatch scripts/run_pilot_l40s.sbatch resume
 ```
 
-O launcher fixa a configuração `configs/main-v1.yaml`, o cache
+O launcher fixa a configuração `configs/main-v2.yaml`, o cache
 `artifacts/huggingface`, a raiz `outputs/` e o `run_id`
-`pilot-seed-101-k01`. Antes de chamar `srun`, ele exporta
+`pilot-greedy-seed-101-k01-v2`. Antes de chamar `srun`, ele exporta
 `CUBLAS_WORKSPACE_CONFIG=:4096:8`, `HF_HUB_OFFLINE=1`,
 `TRANSFORMERS_OFFLINE=1`, `TOKENIZERS_PARALLELISM=false` e
 `PYTHONUNBUFFERED=1`. Ele recusa execução fora do Slurm, sem GPU, com Python
@@ -171,10 +184,10 @@ registros protegidos.
 
 ```text
 outputs/
-├── datasets/pilot-seed-101-k01-dataset-v4/clients/
+├── datasets/pilot-greedy-seed-101-k01-v2-dataset-v4/clients/
 │   ├── victim/<client_id>/conversations.jsonl
 │   └── auxiliary/F0-F1/<presentation>/round-N/conversations.jsonl
-└── runs/pilot-seed-101-k01/
+└── runs/pilot-greedy-seed-101-k01-v2/
     ├── run_manifest.json
     ├── baseline/
     │   ├── completed.json
@@ -196,6 +209,11 @@ Os JSONL de conversas são restritos ao cliente e permanecem fora do Git. As
 gerações e o registro correto ficam somente em `evaluator/private/`; os resumos
 seguros ficam em `evaluator/summaries/`. Checkpoints, caches, datasets e toda a
 árvore de execução também permanecem fora do controle de versão.
+
+O piloto e seus checkpoints usam `pilot-execution/v2`,
+`federated-trajectory/v2` e `federated-checkpoint/v2`. A execução sampling v1 em
+`outputs/runs/pilot-seed-101-k01/` permanece somente como histórico e nunca é
+retomada ou combinada com o piloto greedy.
 
 ## Aceitação científica
 

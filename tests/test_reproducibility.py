@@ -33,7 +33,7 @@ from federated_leakage.training_contracts import (
     parse_local_training_spec,
 )
 from federated_leakage.trusted_evaluator import (
-    _sampling_state,
+    _greedy_state,
     preflight_extraction_audit,
     run_extraction_audit,
 )
@@ -193,7 +193,7 @@ class CudaReproducibilityTests(unittest.TestCase):
                 )
             self.assertEqual(tuple(Path(directory).iterdir()), ())
 
-    def test_sampling_state_rejects_cuda_before_touching_rng_or_model(self):
+    def test_greedy_state_rejects_cuda_before_touching_rng_or_model(self):
         fake_torch = mock.Mock()
         model = mock.Mock()
         received = "segredo-nao-expor"
@@ -201,11 +201,10 @@ class CudaReproducibilityTests(unittest.TestCase):
             os.environ,
             {"CUBLAS_WORKSPACE_CONFIG": received},
         ), self.assertRaises(ExtractionAuditError) as context:
-            with _sampling_state(
+            with _greedy_state(
                 fake_torch,
                 model,
                 SimpleNamespace(type="cuda"),
-                11,
             ):
                 self.fail("o contexto não deveria iniciar")
         fake_torch.random.get_rng_state.assert_not_called()

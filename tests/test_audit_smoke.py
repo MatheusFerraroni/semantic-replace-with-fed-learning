@@ -21,9 +21,9 @@ from federated_leakage.trusted_evaluator import (
 )
 class RealExtractionAuditSmokeTests(unittest.TestCase):
     def test_generates_one_query_of_each_mode_without_mutating_model(self):
-        model_spec = load_model_spec_from_config(Path("configs/main-v1.yaml"))
+        model_spec = load_model_spec_from_config(Path("configs/main-v2.yaml"))
         audit_spec = load_extraction_audit_spec_from_config(
-            Path("configs/main-v1.yaml")
+            Path("configs/main-v2.yaml")
         )
         bundle = load_model_bundle(
             model_spec,

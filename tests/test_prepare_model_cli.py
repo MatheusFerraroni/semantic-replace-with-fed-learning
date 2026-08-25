@@ -62,6 +62,10 @@ class PrepareModelCliTests(unittest.TestCase):
         spec = load_model_spec_from_config(Path("configs/main-v1.yaml"))
         self.assertEqual(spec.model_id, BASE_MODEL_ID)
         self.assertEqual(spec.revision, BASE_MODEL_REVISION)
+        self.assertEqual(
+            spec,
+            load_model_spec_from_config(Path("configs/main-v2.yaml")),
+        )
 
     def test_reads_documented_local_artifact_example(self):
         spec = load_model_spec_from_config(

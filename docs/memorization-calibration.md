@@ -7,11 +7,13 @@ quando os registros sintéticos são treinados sem a diluição do FedAvg. Ela �
 execução de desenvolvimento separada: não modifica nem reutiliza B0, F0 ou F1 do
 piloto e não entra nos resultados da campanha principal.
 
-O contrato `memorization-calibration/v1` fixa seed `101`, cliente
+O contrato `memorization-calibration/v2` fixa seed `101`, cliente
 `positive-canary-01`, 20 perfis completos e quatro doses independentes. A
-configuração [`memorization-calibration-v1.yaml`](../configs/memorization-calibration-v1.yaml)
+configuração [`memorization-calibration-v2.yaml`](../configs/memorization-calibration-v2.yaml)
 referencia o SHA-256 da configuração principal; qualquer mudança em
-`main-v1.yaml` exige uma decisão e uma nova versão da calibração.
+`main-v2.yaml` exige uma decisão e uma nova versão da calibração. O dataset
+`positive-canaries-seed-101-v1` é reutilizado estritamente porque sua geração
+não mudou; uma cópia existente é revalidada e nunca sobrescrita.
 
 ## Dados e treinamento
 
@@ -26,6 +28,8 @@ O preflight rejeita colisões de nome, CPF, RG, telefone, e-mail e endereço con
 as 200 vítimas e as 20 rodadas auxiliares da seed 101. Datas de nascimento e
 datas e horários de atendimento continuam repetíveis. Apenas o fluxo canário é
 entregue ao treinador e ao avaliador canário.
+Os hashes esperados do dataset canário e desse preflight ficam fixados na
+configuração v2; qualquer divergência interrompe a execução.
 
 Cada braço restaura o baseline, cria um AdamW novo e percorre a mesma ordem de
 100 amostras tokenizadas. O otimizador persiste entre repetições do mesmo braço e
@@ -45,9 +49,12 @@ AdamW `1e-5`, lote lógico 4, microbatch 1, BF16 e perda em float32.
 ## Auditoria e gate
 
 O avaliador canário recebe apenas os 20 canários. Ele audita o baseline e os
-quatro braços com a mesma agenda de 1.000 gerações: 100 direcionadas, 800 por
-campo e 100 sem nome. Os contratos de contexto, checkpoint, journal e resultado
-são paralelos aos da auditoria das vítimas e não alteram seus leitores.
+quatro braços com a mesma agenda greedy de 181 gerações: 20 direcionadas, 160
+por campo e uma sem nome. Não há seeds nem réplicas de geração. Os contratos de
+auditoria, checkpoint, journal e resultado canários são v2 e permanecem
+separados dos contratos históricos sampling v1.
+No total, a calibração executa 905 gerações, 3.600 apresentações de conversa e
+900 passos de otimização.
 
 Além dos oito campos direcionados, o resumo separa:
 
@@ -57,8 +64,10 @@ Além dos oito campos direcionados, o resumo separa:
 
 O gate exige ao menos 10 pares distintivos exatos distribuídos por pelo menos
 cinco canários. Todas as doses são executadas. `first_successful_repetition`
-registra a primeira dose aprovada ou `null`; `calibrated=false` encerra a
-execução normalmente, mas bloqueia o trabalho das defesas.
+registra a primeira dose aprovada ou `null`. A promoção exige simultaneamente
+um braço aprovado e `baseline_gate_passed=false`; se o próprio baseline passar,
+`calibrated=false`. Qualquer resultado negativo encerra normalmente, mas bloqueia
+o piloto v2 e o trabalho das defesas.
 
 ## Persistência e retomada
 
@@ -66,7 +75,7 @@ execução normalmente, mas bloqueia o trabalho das defesas.
 outputs/
 ├── datasets/positive-canaries-seed-101-v1/
 │   └── clients/positive-canary-01/conversations.jsonl
-└── runs/memorization-calibration-seed-101-v1/
+└── runs/memorization-calibration-greedy-seed-101-v2/
     ├── run_manifest.json
     ├── baseline/evaluator/
     ├── arms/repetitions-001|005|010|020/
@@ -92,7 +101,7 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 
 python -m federated_leakage.run_memorization_calibration \
-  --config configs/memorization-calibration-v1.yaml \
+  --config configs/memorization-calibration-v2.yaml \
   --device cuda \
   --preflight-only
 ```
@@ -110,3 +119,7 @@ habilita rede nem requeue e serializa jobs pelo nome com `singleton`.
 
 DP-SGD, substituição semântica, rank/NLL e controles negativos não fazem parte
 desta calibração.
+
+Os artefatos anteriores em
+`outputs/runs/memorization-calibration-seed-101-v1/` permanecem históricos,
+imutáveis e incompatíveis com retomada v2.

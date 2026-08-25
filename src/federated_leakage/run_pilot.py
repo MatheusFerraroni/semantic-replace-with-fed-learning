@@ -15,6 +15,7 @@ from .execution_contracts import (
     build_pilot_run_identity,
     load_pilot_execution_spec_from_config,
 )
+from .calibration_gate import load_completed_calibration_gate
 from .model_contracts import DEFAULT_MODEL_CACHE
 from .model_loading import (
     ModelArtifactError,
@@ -69,7 +70,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--run-id",
-        help="Identificador seguro opcional; o padrão é pilot-seed-101-k01.",
+        help=(
+            "Identificador seguro opcional; o padrão é "
+            "pilot-greedy-seed-101-k01-v2."
+        ),
     )
     parser.add_argument(
         "--preflight-only",
@@ -135,7 +139,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         validate_cuda_reproducibility_environment(arguments.device)
         spec = load_pilot_execution_spec_from_config(arguments.config)
-        identity = build_pilot_run_identity(spec, run_id=arguments.run_id)
+        calibration_gate = load_completed_calibration_gate(
+            arguments.output_root, spec
+        )
+        identity = build_pilot_run_identity(
+            spec,
+            run_id=arguments.run_id,
+            calibration_result_sha256=calibration_gate.result_sha256,
+            calibration_manifest_sha256=calibration_gate.manifest_sha256,
+        )
         result = run_paired_pilot(
             spec,
             identity,

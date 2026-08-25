@@ -34,6 +34,7 @@ from federated_leakage.synthetic_profiles.rendering import (
     CANONICAL_PREFIX_TEMPLATE,
 )
 from federated_leakage.trusted_evaluator import (
+    _generate_query,
     _query_schedule,
     prepare_trusted_evaluator,
     run_extraction_audit,
@@ -133,8 +134,6 @@ def _blank_records(spec, context):
             target_index=query.target_index,
             target_entity_id=query.target_entity_id,
             field_type=query.field_type,
-            replicate_index=query.replicate_index,
-            generation_seed=query.generation_seed,
             max_new_tokens=query.max_new_tokens,
             finish_reason="max_tokens",
             prompt=query.prompt,
@@ -146,8 +145,8 @@ def _blank_records(spec, context):
 
 class AuditConfigurationAndContextTests(unittest.TestCase):
     def test_loads_strict_recipe_and_selects_two_targets_per_client(self):
-        spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
-        self.assertEqual(spec.expected_generation_count, 1_000)
+        spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
+        self.assertEqual(spec.expected_generation_count, 181)
         first = _context(11)
         second = _context(11)
         changed = _context(22)
@@ -160,7 +159,7 @@ class AuditConfigurationAndContextTests(unittest.TestCase):
         self.assertNotIn(first.targets[0].value("PERSON_NAME"), repr(first))
 
     def test_target_budgets_are_nested_balanced_and_have_exact_counts(self):
-        spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
         contexts = tuple(_context(101, count) for count in (1, 5, 20, 200))
         target_sets = tuple(
             {record.entity_id for record in context.targets} for context in contexts
@@ -170,7 +169,7 @@ class AuditConfigurationAndContextTests(unittest.TestCase):
         )
         self.assertEqual(
             tuple(len(_query_schedule(spec, context)) for context in contexts),
-            (145, 325, 1_000, 9_100),
+            (10, 46, 181, 1_801),
         )
         twenty = contexts[2]
         self.assertEqual(
@@ -182,22 +181,27 @@ class AuditConfigurationAndContextTests(unittest.TestCase):
         )
         shared = contexts[0].targets[0]
         schedules = tuple(_query_schedule(spec, context) for context in contexts)
-        shared_seeds = []
+        shared_prompts = []
         for context, schedule in zip(contexts, schedules):
             index = context.targets.index(shared)
-            shared_seeds.append(
+            shared_prompts.append(
                 tuple(
-                    query.generation_seed
+                    query.prompt
                     for query in schedule
                     if query.mode == "primary" and query.target_index == index
                 )
             )
-        self.assertEqual(len(set(shared_seeds)), 1)
+        self.assertEqual(len(set(shared_prompts)), 1)
 
     def test_rejects_recipe_drift_duplicate_yaml_and_invalid_dataset(self):
-        config = yaml.safe_load(Path("configs/main-v1.yaml").read_text())
+        with self.assertRaisesRegex(ExtractionAuditError, "legada"):
+            load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        config = yaml.safe_load(Path("configs/main-v2.yaml").read_text())
+        self.assertNotIn("temperature", config["audit"]["generation"])
+        self.assertNotIn("top_p", config["audit"]["generation"])
+        self.assertNotIn("top_k", config["audit"]["generation"])
         config["audit"]["generation"]["top_k"] = 49
-        with self.assertRaisesRegex(ExtractionAuditError, "top_k"):
+        with self.assertRaisesRegex(ExtractionAuditError, "chaves"):
             parse_extraction_audit_spec(config)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "duplicate.yaml"
@@ -215,7 +219,7 @@ class AuditConfigurationAndContextTests(unittest.TestCase):
 class AuditScoringTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        cls.spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
         cls.context = _context()
         cls.bundle = _bundle()
         cls.checkpoint = _checkpoint(cls.context, cls.bundle)
@@ -227,16 +231,16 @@ class AuditScoringTests(unittest.TestCase):
         records[0] = dataclasses.replace(
             records[0], generated_text=CANONICAL_COMPLETION_TEMPLATE.format(**values)
         )
-        other_cpf = self.context.targets[1].value("CPF")
+        other_cpf = self.context.targets[0].value("CPF")
         records[1] = dataclasses.replace(
             records[1],
             generated_text=f" CPF {other_cpf}; CPF 123.456.789-01",
         )
-        field_start = 100
+        field_start = 20
         records[field_start] = dataclasses.replace(
             records[field_start], generated_text=" " + values["BIRTH_DATE"]
         )
-        untargeted_start = 900
+        untargeted_start = 180
         full = CANONICAL_PREFIX_TEMPLATE.format(**values) + CANONICAL_COMPLETION_TEMPLATE.format(**values)
         records[untargeted_start] = dataclasses.replace(
             records[untargeted_start], generated_text=full
@@ -245,7 +249,7 @@ class AuditScoringTests(unittest.TestCase):
         result = score_extraction_audit(
             self.spec, self.context, self.checkpoint, records
         )
-        self.assertEqual(result.generation_count, 1_000)
+        self.assertEqual(result.generation_count, 181)
         self.assertEqual(result.targeted_exact_pair_count, 8)
         self.assertEqual(result.targeted_complete_generation_count, 1)
         self.assertEqual(result.targeted_ordered_complete_generation_count, 1)
@@ -287,7 +291,7 @@ class AuditScoringTests(unittest.TestCase):
         hour = int(expected[:2])
         replacement_hour = hour - 1 if hour == 18 else hour + 1
         candidate = f"{replacement_hour:02d}{expected[2:]}"
-        appointment_time_query = 100 + 7 * 5
+        appointment_time_query = 20 + 7
         records[appointment_time_query] = dataclasses.replace(
             records[appointment_time_query], generated_text=" " + candidate
         )
@@ -300,7 +304,7 @@ class AuditScoringTests(unittest.TestCase):
 
 class AuditStorageAndExecutionTests(unittest.TestCase):
     def setUp(self):
-        self.spec = load_extraction_audit_spec_from_config(Path("configs/main-v1.yaml"))
+        self.spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
         self.context = _context()
         self.bundle = _bundle()
         self.checkpoint = _checkpoint(self.context, self.bundle)
@@ -313,8 +317,6 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
             target_index=query.target_index,
             target_entity_id=query.target_entity_id,
             field_type=query.field_type,
-            replicate_index=query.replicate_index,
-            generation_seed=query.generation_seed,
             max_new_tokens=query.max_new_tokens,
             finish_reason="max_tokens",
             prompt=query.prompt,
@@ -347,7 +349,7 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
             self.assertEqual(resumed.records, (record,))
             metadata = path.with_name("metadata.json")
             payload = json.loads(metadata.read_text())
-            payload["expected_generation_count"] = 999
+            payload["expected_generation_count"] = 180
             metadata.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaises(ExtractionAuditError):
                 prepare_audit_journal(
@@ -360,7 +362,48 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
                     resume=True,
                 )
 
-    def test_runs_all_thousand_queries_and_publishes_safe_summary(self):
+    def test_large_target_budget_journal_uses_its_own_expected_count(self):
+        context = _context(target_count=200)
+        checkpoint = _checkpoint(context, self.bundle)
+        queries = _query_schedule(self.spec, context)
+        with tempfile.TemporaryDirectory() as directory, mock.patch(
+            "federated_leakage.audit_storage.os.fsync"
+        ):
+            journal = prepare_audit_journal(
+                output_root=Path(directory),
+                run_id="run-200",
+                spec=self.spec,
+                context=context,
+                checkpoint=checkpoint,
+                generation_schedule_sha256="a" * 64,
+                resume=True,
+            )
+            for query in queries[:182]:
+                journal.append(
+                    AuditGenerationRecord(
+                        query_index=query.query_index,
+                        mode=query.mode,
+                        target_index=query.target_index,
+                        target_entity_id=query.target_entity_id,
+                        field_type=query.field_type,
+                        max_new_tokens=query.max_new_tokens,
+                        finish_reason="max_tokens",
+                        prompt=query.prompt,
+                        generated_text="",
+                    )
+                )
+            resumed = prepare_audit_journal(
+                output_root=Path(directory),
+                run_id="run-200",
+                spec=self.spec,
+                context=context,
+                checkpoint=checkpoint,
+                generation_schedule_sha256="a" * 64,
+                resume=True,
+            )
+            self.assertEqual(len(resumed.records), 182)
+
+    def test_runs_all_greedy_queries_and_publishes_safe_summary(self):
         rng_before = torch.random.get_rng_state().clone()
         self.bundle.model.train()
         with tempfile.TemporaryDirectory() as directory, mock.patch(
@@ -378,9 +421,16 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
             private = Path(directory) / "run-11/evaluator/private/audits/B0-targets-020-round-000/extraction_results.jsonl"
             self.assertTrue(summary.is_file())
             self.assertTrue(private.is_file())
-            self.assertEqual(len(private.read_text().splitlines()), 1_000)
-            self.assertEqual(len(self.bundle.model.calls), 1_000)
-            self.assertEqual(result.generation_count, 1_000)
+            self.assertEqual(len(private.read_text().splitlines()), 181)
+            self.assertEqual(len(self.bundle.model.calls), 181)
+            self.assertEqual(result.generation_count, 181)
+            generation_call = self.bundle.model.calls[0]
+            self.assertFalse(generation_call["do_sample"])
+            self.assertEqual(generation_call["num_beams"], 1)
+            self.assertEqual(generation_call["num_return_sequences"], 1)
+            self.assertNotIn("temperature", generation_call)
+            self.assertNotIn("top_p", generation_call)
+            self.assertNotIn("top_k", generation_call)
             repeated = run_extraction_audit(
                 self.spec,
                 self.context,
@@ -390,7 +440,7 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
                 run_id="run-11",
             )
             self.assertEqual(repeated, result)
-            self.assertEqual(len(self.bundle.model.calls), 1_000)
+            self.assertEqual(len(self.bundle.model.calls), 181)
             self.assertTrue(self.bundle.model.training)
             self.assertTrue(torch.equal(torch.random.get_rng_state(), rng_before))
             self.assertEqual(os.stat(summary).st_mode & 0o777, 0o600)
@@ -408,6 +458,24 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
                     run_id="run-11",
                     resume=False,
                 )
+
+    def test_greedy_generation_is_rng_independent_and_never_seeds_torch(self):
+        query = _query_schedule(self.spec, self.context)[0]
+        original = torch.random.get_rng_state().clone()
+        try:
+            first_state = torch.Generator().manual_seed(1).get_state()
+            second_state = torch.Generator().manual_seed(2).get_state()
+            records = []
+            for state in (first_state, second_state):
+                torch.random.set_rng_state(state)
+                before = torch.random.get_rng_state().clone()
+                with mock.patch("torch.manual_seed") as manual_seed:
+                    records.append(_generate_query(self.spec, self.bundle, query))
+                manual_seed.assert_not_called()
+                self.assertTrue(torch.equal(torch.random.get_rng_state(), before))
+            self.assertEqual(records[0], records[1])
+        finally:
+            torch.random.set_rng_state(original)
 
     def test_unsafe_path_symlink_and_generation_failure_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:

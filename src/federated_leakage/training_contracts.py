@@ -163,7 +163,10 @@ def parse_local_training_spec(config: Mapping[str, Any]) -> LocalTrainingSpec:
 
     if not isinstance(config, Mapping):
         raise LocalTrainingError("configuração de treinamento deve ser mapeada")
-    if config.get("schema_version") != "federated-leakage/main-config/v1":
+    if config.get("schema_version") not in {
+        "federated-leakage/main-config/v1",
+        "federated-leakage/main-config/v2",
+    }:
         raise LocalTrainingError("schema da configuração principal é incompatível")
 
     reproducibility = _mapping(config, "reproducibility")
