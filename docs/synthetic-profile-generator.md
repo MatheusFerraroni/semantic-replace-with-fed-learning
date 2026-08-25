@@ -165,10 +165,12 @@ são opcionais; nenhum destino existente é sobrescrito.
 ```python
 from federated_leakage.synthetic_profiles import (
     AuxiliaryRoundGenerator,
+    PositiveCanaryDatasetGenerator,
     VictimDatasetGenerator,
     read_auxiliary_round,
     read_victim_client_dataset,
     write_auxiliary_round,
+    write_positive_canary_dataset,
     write_victim_datasets,
 )
 
@@ -179,11 +181,15 @@ benign_round = generator.generate(round_id=1, presentation="benign")
 adversarial_round = generator.generate(round_id=1, presentation="adversarial")
 
 victim_datasets = VictimDatasetGenerator(11).generate()
+positive_canaries = PositiveCanaryDatasetGenerator(101).generate()
 
 output_root = Path("outputs/datasets")
 dataset_id = "seed-11-main-v4"
 write_victim_datasets(output_root, dataset_id, victim_datasets)
 write_auxiliary_round(output_root, dataset_id, "F0-F1", benign_round)
+write_positive_canary_dataset(
+    output_root, "positive-canaries-seed-101-v1", positive_canaries
+)
 
 # Cada consumidor abre somente seu próprio caminho lógico.
 victim_01 = read_victim_client_dataset(
@@ -196,6 +202,10 @@ auxiliary_round_01 = read_auxiliary_round(
 # Depois do treinamento local, descarte os objetos em memória.
 del benign_round, adversarial_round, victim_datasets
 ```
+
+O gerador canário usa namespace próprio, produz um cliente com 20 entidades e
+100 conversas 80/20 e aplica perda integral a todas elas. Sua persistência fica
+em um dataset exclusivo e nunca é misturada à árvore das vítimas ou do auxiliar.
 
 Na campanha, cada componente recebe somente a API e o caminho correspondentes ao
 seu papel. A seed, por si só, não é um mecanismo de controle de acesso.

@@ -9,8 +9,9 @@ treinamento federado de todos os parâmetros do Tucano 2 0.6B.
 O repositório contém a especificação, o contrato do modelo, a configuração da
 campanha, o carregador validado do Tucano 2 e a implementação executável dos
 perfis e conversas sintéticas, da tokenização, do treinamento local não privado,
-do FedAvg, da auditoria central de extração e do orquestrador retomável do piloto
-B0/F0/F1 de 20 rodadas. A campanha principal e as defesas continuam pendentes.
+do FedAvg, da auditoria central de extração, do orquestrador retomável do piloto
+B0/F0/F1 de 20 rodadas e da calibração positiva vulnerável com canários completos.
+A campanha principal e as defesas continuam pendentes.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
@@ -18,6 +19,7 @@ B0/F0/F1 de 20 rodadas. A campanha principal e as defesas continuam pendentes.
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
 - [Orquestrador retomável do piloto](docs/pilot-orchestrator.md)
+- [Calibração positiva de memorização](docs/memorization-calibration.md)
 
 | Componente | Estado executável |
 | --- | --- |
@@ -28,9 +30,10 @@ B0/F0/F1 de 20 rodadas. A campanha principal e as defesas continuam pendentes.
 | Treinamento local não privado | Implementado |
 | FedAvg e execução de uma rodada F0/F1 | Implementado |
 | Orquestração retomável do piloto B0/F0/F1 | Implementado |
+| Controle positivo vulnerável com canários completos | Implementado |
 | DP-SGD e substituições semânticas | Não implementado |
 | Auditoria central de extração B0/F0/F1 | Implementado |
-| Diagnósticos auxiliares, rank/NLL e controles | Não implementado |
+| Diagnósticos auxiliares, rank/NLL e controles negativos | Não implementado |
 
 ## Modelo de ameaça
 
@@ -390,6 +393,38 @@ Git. Não há requeue automático: após `TIMEOUT`, consulte `sacct` e os logs e
 submeta novamente o modo `resume`, que reutiliza o último checkpoint confirmado
 ou reproduz a rodada incompleta.
 
+## Calibrar memorização com canários completos
+
+A calibração é independente do piloto finalizado. Ela gera 20 perfis-canário
+disjuntos, treina quatro braços partindo do mesmo baseline com 1, 5, 10 e 20
+repetições do bundle de 100 conversas e audita o baseline e os quatro modelos.
+São 3.600 apresentações, 900 passos AdamW e 5.000 gerações no total.
+
+Valide primeiro, sem escrever:
+
+```bash
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python -m federated_leakage.run_memorization_calibration \
+  --config configs/memorization-calibration-v1.yaml \
+  --device cuda \
+  --preflight-only
+```
+
+No Slurm, use sempre um modo explícito:
+
+```bash
+sbatch scripts/run_memorization_calibration_l40s.sbatch preflight
+sbatch scripts/run_memorization_calibration_l40s.sbatch start
+sbatch scripts/run_memorization_calibration_l40s.sbatch resume
+```
+
+`start` cria uma execução nova e `resume` revalida braços, checkpoints e
+auditorias já publicados. A calibração termina validamente mesmo quando o limiar
+não é alcançado; nesse caso, `calibrated=false` bloqueia o desenvolvimento das
+defesas até uma nova decisão de protocolo. Consulte
+[`docs/memorization-calibration.md`](docs/memorization-calibration.md).
+
 ## Gerar um dataset para inspeção
 
 Depois da instalação editável, uma única seed gera os dez clientes-vítima e as
@@ -419,7 +454,9 @@ tokenização, máscaras, padding, perda por conversa, gradient accumulation,
 rollback, deltas em streaming, pesos FedAvg, aplicação atômica, pareamento F0/F1
 e auditoria com orçamentos aninhados, checkpoints `safetensors`, retomada
 transacional, continuidade independente das trajetórias e recuperação de falha
-após auditoria, além do carregamento estrito e offline do modelo. Os
+após auditoria, além do controle positivo canário com doses prefixadas,
+checkpoint por braço e critério distintivo, e do carregamento estrito e offline
+do modelo. Os
 testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
 preparado:
 

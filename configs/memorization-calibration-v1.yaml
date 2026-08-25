@@ -1,0 +1,18 @@
+schema_version: memorization-calibration/v1
+main_config: main-v1.yaml
+main_config_sha256: 51921b75647ae8dfb83161a60cd8b2698ce3cfbadcdde6dd8e6acbeb6474643e
+experiment_seed: 101
+client_id: positive-canary-01
+dataset_id: positive-canaries-seed-101-v1
+default_run_id: memorization-calibration-seed-101-v1
+repetitions: [1, 5, 10, 20]
+conversations_per_repetition: 100
+optimizer_steps_per_repetition: 25
+expected_total_conversation_presentations: 3600
+expected_total_optimizer_steps: 900
+audit_generations_per_model: 1000
+expected_total_audit_generations: 5000
+calibration_criterion:
+  distinctive_exact_pairs: 10
+  distinctive_entities: 5
+checkpoint_all_arms: true

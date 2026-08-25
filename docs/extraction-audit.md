@@ -116,5 +116,6 @@ servidor, clientes e adversário não recebem nenhum dos dois caminhos.
 
 O piloto B0/F0/F1 já invoca automaticamente a auditoria depois de cada uma das
 20 rodadas. Continuam fora deste contrato diagnósticos de perfis auxiliares,
-rank/NLL, controles negativos, canários, utilidade, F2/F3 e métricas das
-substituições F4/F5.
+rank/NLL, controles negativos, utilidade, F2/F3 e métricas das substituições
+F4/F5. O controle positivo canário possui executor paralelo próprio, descrito em
+`memorization-calibration.md`, sem alterar os contratos B0/F0/F1 desta página.

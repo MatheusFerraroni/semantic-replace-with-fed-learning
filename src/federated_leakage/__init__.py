@@ -138,6 +138,40 @@ from .trusted_evaluator import (
     score_extraction_audit,
     validate_paired_extraction_audit_results,
 )
+from .calibration_contracts import (
+    CALIBRATION_REPETITIONS,
+    MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION,
+    MEMORIZATION_CALIBRATION_SCHEMA_VERSION,
+    POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION,
+    POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION,
+    POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION,
+    POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION,
+    CanaryFieldMetric,
+    MemorizationCalibrationArmResult,
+    MemorizationCalibrationError,
+    MemorizationCalibrationPreflightResult,
+    MemorizationCalibrationResult,
+    MemorizationCalibrationSpec,
+    PositiveCanaryAuditCheckpoint,
+    PositiveCanaryAuditResult,
+    PositiveCanaryEvaluatorContext,
+    load_memorization_calibration_spec_from_config,
+)
+from .calibration_checkpointing import (
+    load_calibration_checkpoint,
+    save_calibration_checkpoint,
+)
+from .calibration_training import train_memorization_calibration_arm
+from .canary_audit import (
+    preflight_positive_canary_audit,
+    prepare_positive_canary_evaluator,
+    run_positive_canary_audit,
+    score_positive_canary_audit,
+)
+from .memorization_calibration import (
+    preflight_memorization_calibration,
+    run_memorization_calibration,
+)
 
 __all__ = [
     "ALLOWED_AUDIT_TARGET_COUNTS",
@@ -251,4 +285,30 @@ __all__ = [
     "restore_model_parameter_snapshot",
     "ReproducibilityEnvironmentError",
     "validate_cuda_reproducibility_environment",
+    "CALIBRATION_REPETITIONS",
+    "MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION",
+    "MEMORIZATION_CALIBRATION_SCHEMA_VERSION",
+    "POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION",
+    "POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION",
+    "POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION",
+    "POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION",
+    "CanaryFieldMetric",
+    "MemorizationCalibrationArmResult",
+    "MemorizationCalibrationError",
+    "MemorizationCalibrationPreflightResult",
+    "MemorizationCalibrationResult",
+    "MemorizationCalibrationSpec",
+    "PositiveCanaryAuditCheckpoint",
+    "PositiveCanaryAuditResult",
+    "PositiveCanaryEvaluatorContext",
+    "load_calibration_checkpoint",
+    "load_memorization_calibration_spec_from_config",
+    "preflight_memorization_calibration",
+    "preflight_positive_canary_audit",
+    "prepare_positive_canary_evaluator",
+    "run_memorization_calibration",
+    "run_positive_canary_audit",
+    "save_calibration_checkpoint",
+    "score_positive_canary_audit",
+    "train_memorization_calibration_arm",
 ]

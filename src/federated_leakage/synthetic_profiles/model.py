@@ -1,6 +1,6 @@
 """Contratos sintéticos validados antes de uso em memória ou JSONL local."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, time
 from typing import Dict, Literal, Optional, Tuple
 
@@ -10,6 +10,7 @@ GENERATOR_VERSION = "synthetic-profile-generator/v4"
 CONVERSATION_SCHEMA_VERSION = "training-conversation/v1"
 CONVERSATION_GENERATOR_VERSION = "training-conversation-generator/v1"
 VICTIM_DATASET_SCHEMA_VERSION = "victim-client-dataset/v1"
+POSITIVE_CANARY_DATASET_SCHEMA_VERSION = "positive-canary-client-dataset/v1"
 AUXILIARY_ROUND_SCHEMA_VERSION = "auxiliary-round/v2"
 
 BIRTH_DATE_START = date(1966, 1, 1)
@@ -124,6 +125,15 @@ class VictimClientDataset:
     client_id: str
     conversations: Tuple[TrainingConversation, ...]
     schema_version: str = VICTIM_DATASET_SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PositiveCanaryClientDataset:
+    """As 100 conversas do controle positivo sintético vulnerável."""
+
+    client_id: str
+    conversations: Tuple[TrainingConversation, ...] = field(repr=False)
+    schema_version: str = POSITIVE_CANARY_DATASET_SCHEMA_VERSION
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

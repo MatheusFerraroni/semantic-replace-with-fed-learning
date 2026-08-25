@@ -10,6 +10,7 @@ from .conversations import (
     render_protected_conversation,
 )
 from .documents import cpf_has_valid_checksum, rg_has_valid_reference_checksum
+from .canaries import PositiveCanaryDatasetGenerator
 from .generator import (
     AUXILIARY_ROUNDS,
     GENERAL_RECORDS_PER_ROUND,
@@ -37,6 +38,7 @@ from .model import (
     EMAIL_LOCAL_PART_MAX_LENGTH,
     EMAIL_PATTERN_VERSION,
     PROFILE_FIELD_ORDER,
+    POSITIVE_CANARY_DATASET_SCHEMA_VERSION,
     UNIQUE_FIELD_TYPES,
     VICTIM_DATASET_SCHEMA_VERSION,
     AuxiliaryPresentation,
@@ -50,6 +52,7 @@ from .model import (
     SyntheticProfile,
     TrainingConversation,
     VictimClientDataset,
+    PositiveCanaryClientDataset,
     profile_field_values,
 )
 from .rendering import (
@@ -63,8 +66,10 @@ from .storage import (
     CONVERSATION_JSONL_SCHEMA_VERSION,
     DatasetStorageError,
     read_auxiliary_round,
+    read_positive_canary_dataset,
     read_victim_client_dataset,
     write_auxiliary_round,
+    write_positive_canary_dataset,
     write_victim_datasets,
 )
 from .validation import (
@@ -74,6 +79,7 @@ from .validation import (
     validate_conversation_preflight,
     validate_no_cross_flow_collisions,
     validate_paired_auxiliary_rounds,
+    validate_positive_canary_dataset,
     validate_profile,
     validate_profile_collection,
     validate_rendered_profile,
@@ -125,6 +131,7 @@ __all__ = [
     "DatasetStorageError",
     "FieldAnnotation",
     "PROFILE_FIELD_ORDER",
+    "POSITIVE_CANARY_DATASET_SCHEMA_VERSION",
     "ProfileValidationError",
     "ConversationValidationError",
     "RenderedProfile",
@@ -132,6 +139,8 @@ __all__ = [
     "TrainingConversation",
     "UNIQUE_FIELD_TYPES",
     "VictimClientDataset",
+    "PositiveCanaryClientDataset",
+    "PositiveCanaryDatasetGenerator",
     "VictimDatasetGenerator",
     "append_round_manifest",
     "build_generation_manifest",
@@ -141,6 +150,7 @@ __all__ = [
     "cpf_has_valid_checksum",
     "profile_field_values",
     "read_auxiliary_round",
+    "read_positive_canary_dataset",
     "read_victim_client_dataset",
     "render_general_conversation",
     "render_profile",
@@ -150,12 +160,14 @@ __all__ = [
     "validate_conversation_preflight",
     "validate_no_cross_flow_collisions",
     "validate_paired_auxiliary_rounds",
+    "validate_positive_canary_dataset",
     "validate_profile",
     "validate_profile_collection",
     "validate_rendered_profile",
     "validate_training_conversation",
     "validate_victim_dataset",
     "write_auxiliary_round",
+    "write_positive_canary_dataset",
     "write_generation_manifest",
     "write_victim_datasets",
     "write_victim_dataset_manifest",

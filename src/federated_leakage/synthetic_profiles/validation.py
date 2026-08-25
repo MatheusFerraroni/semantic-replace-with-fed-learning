@@ -22,6 +22,7 @@ from .model import (
     EMAIL_LOCAL_PART_MAX_LENGTH,
     PROFILE_FIELD_ORDER,
     PROFILE_SCHEMA_VERSION,
+    POSITIVE_CANARY_DATASET_SCHEMA_VERSION,
     UNIQUE_FIELD_TYPES,
     VICTIM_DATASET_SCHEMA_VERSION,
     AuxiliaryRound,
@@ -29,6 +30,7 @@ from .model import (
     SyntheticProfile,
     TrainingConversation,
     VictimClientDataset,
+    PositiveCanaryClientDataset,
     profile_field_values,
 )
 from .rendering import CANONICAL_PREFIX_TEMPLATE, CANONICAL_PROFILE_TEMPLATE
@@ -293,6 +295,53 @@ def validate_victim_dataset(dataset: VictimClientDataset) -> None:
 
     if set(general_template_ids) != set(GENERAL_CONVERSATION_TEMPLATE_IDS):
         raise ConversationValidationError("catálogo geral do cliente está incompleto")
+    _assert_general_has_no_protected_values(dataset.conversations)
+    validate_no_cross_flow_collisions((dataset.conversations,))
+
+
+def validate_positive_canary_dataset(dataset: PositiveCanaryClientDataset) -> None:
+    """Valida o bundle canário sem reutilizar a identidade de uma vítima."""
+
+    if dataset.schema_version != POSITIVE_CANARY_DATASET_SCHEMA_VERSION:
+        raise ConversationValidationError("schema_version do dataset canário inválida")
+    if dataset.client_id != "positive-canary-01":
+        raise ConversationValidationError("client_id do dataset canário inválido")
+    if len(dataset.conversations) != 100:
+        raise ConversationValidationError("dataset canário não contém 100 conversas")
+    if {item.sample_index for item in dataset.conversations} != set(range(100)):
+        raise ConversationValidationError("índices do dataset canário inválidos")
+
+    by_entity: Dict[str, list[TrainingConversation]] = defaultdict(list)
+    for conversation in dataset.conversations:
+        validate_training_conversation(conversation)
+        if conversation.client_id != dataset.client_id:
+            raise ConversationValidationError("conversa pertence a outro cliente")
+        if conversation.round_id is not None:
+            raise ConversationValidationError("dataset canário não pode depender de rodada")
+        if conversation.loss_scope != "all_tokens":
+            raise ConversationValidationError("dataset canário não usa perda integral")
+        by_entity[conversation.entity_id].append(conversation)
+    if len(by_entity) != 20:
+        raise ConversationValidationError("dataset canário não contém 20 entidades")
+
+    general_ids = []
+    for conversations in by_entity.values():
+        protected = [item for item in conversations if item.kind == "protected"]
+        general = [item for item in conversations if item.kind == "general"]
+        if len(protected) != 4 or len(general) != 1:
+            raise ConversationValidationError(
+                "entidade canária não possui quatro protegidas e uma geral"
+            )
+        if {item.template_id for item in protected} != set(
+            PROTECTED_NATURAL_TEMPLATE_IDS
+        ):
+            raise ConversationValidationError("molduras canárias estão incompletas")
+        reference = _conversation_values(protected[0])
+        if any(_conversation_values(item) != reference for item in protected[1:]):
+            raise ConversationValidationError("valores canários variam na entidade")
+        general_ids.append(general[0].template_id)
+    if set(general_ids) != set(GENERAL_CONVERSATION_TEMPLATE_IDS):
+        raise ConversationValidationError("catálogo geral canário está incompleto")
     _assert_general_has_no_protected_values(dataset.conversations)
     validate_no_cross_flow_collisions((dataset.conversations,))
 

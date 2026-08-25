@@ -15,17 +15,20 @@ from .model import (
     CONVERSATION_GENERATOR_VERSION,
     CONVERSATION_SCHEMA_VERSION,
     GENERATOR_VERSION,
+    POSITIVE_CANARY_DATASET_SCHEMA_VERSION,
     VICTIM_DATASET_SCHEMA_VERSION,
     AuxiliaryPresentation,
     AuxiliaryRound,
     FieldAnnotation,
     TrainingConversation,
     VictimClientDataset,
+    PositiveCanaryClientDataset,
 )
 from .validation import (
     validate_auxiliary_round,
     validate_training_conversation,
     validate_victim_dataset,
+    validate_positive_canary_dataset,
 )
 
 
@@ -67,6 +70,7 @@ _COMMON_METADATA_KEYS = frozenset(
     }
 )
 _VICTIM_METADATA_KEYS = _COMMON_METADATA_KEYS
+_POSITIVE_CANARY_METADATA_KEYS = _COMMON_METADATA_KEYS
 _AUXILIARY_METADATA_KEYS = _COMMON_METADATA_KEYS | frozenset(
     {"schedule_id", "presentation", "round_id"}
 )
@@ -342,6 +346,116 @@ def _auxiliary_artifact_directory(
         / schedule_id
         / presentation
         / f"round-{round_id:03d}"
+    )
+
+
+def _positive_canary_artifact_directory(
+    output_root: Path,
+    dataset_id: str,
+    client_id: str,
+) -> Path:
+    return output_root / dataset_id / "clients" / client_id
+
+
+def write_positive_canary_dataset(
+    output_root: Path,
+    dataset_id: str,
+    dataset: PositiveCanaryClientDataset,
+) -> Path:
+    """Publica exclusivamente o bundle canário validado."""
+
+    resolved_dataset_id = _validate_component(dataset_id, "dataset_id")
+    _validate_component(dataset.client_id, "client_id")
+    validate_positive_canary_dataset(dataset)
+    output_root = Path(output_root)
+    if output_root.exists() and (output_root.is_symlink() or not output_root.is_dir()):
+        raise DatasetStorageError("raiz do dataset canário é inválida")
+    output_root.mkdir(parents=True, exist_ok=True)
+    target_root = output_root / resolved_dataset_id
+    if target_root.exists():
+        raise FileExistsError(target_root)
+    staging_root = Path(tempfile.mkdtemp(prefix=".canary-staging-", dir=output_root))
+    try:
+        os.chmod(staging_root, 0o700)
+        artifact = staging_root / "clients" / dataset.client_id
+        metadata = _common_metadata(
+            dataset_id=resolved_dataset_id,
+            role="positive_canary",
+            client_id=dataset.client_id,
+            container_schema_version=dataset.schema_version,
+        )
+        _write_artifact_files(artifact, dataset.conversations, metadata)
+        os.chmod(staging_root / "clients", 0o700)
+        _read_positive_canary_artifact(
+            artifact,
+            expected_dataset_id=resolved_dataset_id,
+            expected_client_id=dataset.client_id,
+        )
+        staging_root.rename(target_root)
+    except Exception:
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+        raise
+    return target_root / "clients" / dataset.client_id / "conversations.jsonl"
+
+
+def _read_positive_canary_artifact(
+    artifact_directory: Path,
+    *,
+    expected_dataset_id: str,
+    expected_client_id: str,
+) -> PositiveCanaryClientDataset:
+    if (
+        artifact_directory.is_symlink()
+        or not artifact_directory.is_dir()
+        or {item.name for item in artifact_directory.iterdir()}
+        != {"metadata.json", "conversations.jsonl"}
+        or any(
+            item.is_symlink() or not item.is_file()
+            for item in artifact_directory.iterdir()
+        )
+    ):
+        raise DatasetStorageError("estrutura do cliente-canário é inválida")
+    metadata, conversations = _load_artifact(
+        artifact_directory,
+        expected_metadata_keys=_POSITIVE_CANARY_METADATA_KEYS,
+    )
+    expected = {
+        "schema_version": ARTIFACT_METADATA_SCHEMA_VERSION,
+        "jsonl_schema_version": CONVERSATION_JSONL_SCHEMA_VERSION,
+        "container_schema_version": POSITIVE_CANARY_DATASET_SCHEMA_VERSION,
+        "conversation_schema_version": CONVERSATION_SCHEMA_VERSION,
+        "profile_generator_version": GENERATOR_VERSION,
+        "conversation_generator_version": CONVERSATION_GENERATOR_VERSION,
+        "dataset_id": expected_dataset_id,
+        "role": "positive_canary",
+        "client_id": expected_client_id,
+    }
+    if any(metadata[key] != value for key, value in expected.items()):
+        raise DatasetStorageError("metadados do cliente-canário divergem")
+    dataset = PositiveCanaryClientDataset(
+        client_id=expected_client_id,
+        conversations=conversations,
+    )
+    validate_positive_canary_dataset(dataset)
+    return dataset
+
+
+def read_positive_canary_dataset(
+    output_root: Path,
+    dataset_id: str,
+    client_id: str = "positive-canary-01",
+) -> PositiveCanaryClientDataset:
+    """Lê somente o bundle canário identificado."""
+
+    resolved_dataset_id = _validate_component(dataset_id, "dataset_id")
+    resolved_client_id = _validate_component(client_id, "client_id")
+    return _read_positive_canary_artifact(
+        _positive_canary_artifact_directory(
+            Path(output_root), resolved_dataset_id, resolved_client_id
+        ),
+        expected_dataset_id=resolved_dataset_id,
+        expected_client_id=resolved_client_id,
     )
 
 

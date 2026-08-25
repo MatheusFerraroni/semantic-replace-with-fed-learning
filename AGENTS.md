@@ -156,6 +156,19 @@ todos os parâmetros do Tucano 2 0.6B.
   checkpoint móvel nas demais. Persistir pesos exclusivamente em `safetensors`,
   sem otimizadores, deltas, tokens, textos ou registros protegidos.
 - Reiniciar e reexecutar todos os cenários quando o artefato inicial mudar.
+- Calibrar a capacidade de memorização em execução separada com seed `101`, 20
+  perfis-canário completos e disjuntos e braços independentes de 1, 5, 10 e 20
+  repetições, todos partindo do mesmo baseline pinado.
+- Manter um único AdamW dentro de cada braço canário e reiniciá-lo entre braços.
+  A dose não entra na derivação da seed nem na ordem das 100 conversas, de modo
+  que braços maiores preservem o prefixo de treinamento dos menores.
+- Auditar o baseline e os quatro braços canários com os mesmos 20 alvos e
+  sementes. Considerar o controle calibrado somente com pelo menos 10 pares
+  distintivos exatos distribuídos por pelo menos cinco canários; executar todas
+  as doses e registrar resultado negativo sem escalada automática.
+- Manter dados, checkpoints e artefatos privados da calibração separados do
+  piloto e da campanha. `calibrated=false` bloqueia o desenvolvimento das
+  defesas até decisão explícita de protocolo.
 
 ## Regras de implementação
 
@@ -177,6 +190,9 @@ todos os parâmetros do Tucano 2 0.6B.
   `start` ou `resume`. Usar dependência Slurm `singleton`, manter os logs na
   raiz ignorada do projeto e retomar manualmente após `TIMEOUT`; não configurar
   requeue automático.
+- Executar a calibração positiva em uma única L40S pelo launcher
+  `scripts/run_memorization_calibration_l40s.sbatch`, também com modo explícito,
+  ambiente offline, dependência `singleton` e retomada manual.
 - Não alterar pressupostos experimentais silenciosamente. Registrar mudanças no
   protocolo, README ou configuração da execução.
 - Relatar privacidade e utilidade juntas, inclusive resultados negativos e

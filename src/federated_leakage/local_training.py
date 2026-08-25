@@ -327,6 +327,40 @@ def _run_logical_batch(
     return sum(conversation_losses) / logical_batch_size, gradient_norm_value
 
 
+def _create_adamw_optimizer(
+    torch: Any,
+    parameters: Sequence[Any],
+    spec: LocalTrainingSpec,
+) -> Any:
+    """Cria e confere o AdamW normativo sem manter estado entre clientes."""
+
+    try:
+        optimizer = torch.optim.AdamW(
+            parameters,
+            lr=spec.learning_rate,
+            betas=spec.betas,
+            eps=spec.optimizer_epsilon,
+            weight_decay=spec.weight_decay,
+            amsgrad=False,
+            maximize=False,
+            foreach=False,
+            capturable=False,
+            differentiable=False,
+            fused=False,
+        )
+    except Exception as error:
+        raise LocalTrainingError("falha ao criar otimizador local") from error
+    optimizer_parameters = tuple(
+        parameter for group in optimizer.param_groups for parameter in group["params"]
+    )
+    if len(optimizer_parameters) != len(parameters) or any(
+        expected is not actual
+        for expected, actual in zip(parameters, optimizer_parameters)
+    ):
+        raise LocalTrainingError("otimizador local não cobre todos os parâmetros")
+    return optimizer
+
+
 def train_local_client(
     samples: Sequence[TokenizedConversation],
     model_bundle: LoadedModelBundle,
@@ -365,32 +399,7 @@ def train_local_client(
     torch_seed, seed_hash = _training_seed(seed, client_id, round_id)
     _configure_determinism(torch, torch_seed, device.type)
 
-    try:
-        optimizer = torch.optim.AdamW(
-            parameters,
-            lr=validated_spec.learning_rate,
-            betas=validated_spec.betas,
-            eps=validated_spec.optimizer_epsilon,
-            weight_decay=validated_spec.weight_decay,
-            amsgrad=False,
-            maximize=False,
-            foreach=False,
-            capturable=False,
-            differentiable=False,
-            fused=False,
-        )
-    except Exception as error:
-        raise LocalTrainingError("falha ao criar otimizador local") from error
-    optimizer_parameters = tuple(
-        parameter
-        for group in optimizer.param_groups
-        for parameter in group["params"]
-    )
-    if len(optimizer_parameters) != len(parameters) or any(
-        expected is not actual
-        for expected, actual in zip(parameters, optimizer_parameters)
-    ):
-        raise LocalTrainingError("otimizador local não cobre todos os parâmetros")
+    optimizer = _create_adamw_optimizer(torch, parameters, validated_spec)
 
     previous_training_mode = bool(getattr(model, "training", False))
     step_losses = []

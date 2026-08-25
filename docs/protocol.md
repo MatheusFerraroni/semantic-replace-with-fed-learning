@@ -516,8 +516,9 @@ O núcleo central descrito nas seções 8.1–8.3 está implementado para B0 e
 checkpoints F0/F1 pelos contratos `trusted-evaluator/v2`,
 `audit-target-budget/v1`, `extraction-audit/v1` e
 `extraction-audit-result/v2`. O piloto chama a auditoria automaticamente após
-cada rodada. Diagnósticos auxiliares, rank/NLL, controles, canários e métricas de
-substituição continuam especificados, mas ainda não possuem executor.
+cada rodada. A calibração positiva canária possui um executor paralelo próprio.
+Diagnósticos auxiliares, rank/NLL, controles negativos e métricas de substituição
+continuam especificados, mas ainda não possuem executor.
 
 Antes da execução, o avaliador seleciona de forma estratificada 20
 participantes-alvo, dois por cliente-vítima. Ele aplica ao modelo inicial e aos
@@ -628,7 +629,24 @@ rodadas 0, 10 e 20 contra 10.000 candidatos do mesmo tipo e comprimento em
 tokens.
 
 O controle positivo com canários roda separadamente e nunca altera B0 ou F0-F5.
-Se ele falhar, a campanha é inconclusiva.
+A implementação vulnerável usa seed de desenvolvimento `101`, 20 perfis-canário
+completos e disjuntos e o mesmo bundle 80/20 das vítimas, sempre com perda
+integral. Quatro braços independentes partem do baseline pinado e repetem o
+bundle 1, 5, 10 ou 20 vezes, mantendo um AdamW contínuo somente dentro do braço.
+Isso produz 25, 125, 250 e 500 passos, respectivamente.
+
+O baseline e os quatro braços são auditados com os mesmos 20 alvos e sementes,
+1.000 gerações por modelo. A calibração é positiva quando ao menos 10 pares
+exatos dos campos distintivos CPF, RG, telefone, e-mail e endereço se distribuem
+por pelo menos cinco canários. Todos os braços são executados mesmo após o
+primeiro sucesso. `calibrated=false` é uma conclusão operacional válida, mas
+bloqueia a promoção para as defesas e exige nova decisão de protocolo.
+
+Os artefatos usam contratos paralelos e não alteram os schemas B0/F0/F1. Cada
+braço preserva seu checkpoint `safetensors`; o registro canário e as gerações
+brutas permanecem somente na área privada do avaliador. O launcher Slurm
+`scripts/run_memorization_calibration_l40s.sbatch` fixa uma L40S por oito horas,
+ambiente offline e os modos explícitos `preflight`, `start` e `resume`.
 
 Antes da campanha principal, uma semente de desenvolvimento executa B0, F0 e F1
 com seed `101` e `k=1`. O orçamento de referência de 20 participantes-alvo roda
