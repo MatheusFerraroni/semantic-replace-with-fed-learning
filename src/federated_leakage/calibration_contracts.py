@@ -14,17 +14,17 @@ from .audit_contracts import GREEDY_DECODING_STRATEGY, ProtectedEntityRecord
 from .synthetic_profiles.storage import validate_storage_component
 
 
-MEMORIZATION_CALIBRATION_SCHEMA_VERSION = "memorization-calibration/v2"
-MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION = "memorization-calibration-arm/v1"
-POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION = "positive-canary-audit-context/v2"
-POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION = "positive-canary-audit-checkpoint/v2"
-POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION = "positive-canary-audit-result/v2"
-POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION = "positive-canary-audit-journal/v2"
+MEMORIZATION_CALIBRATION_SCHEMA_VERSION = "memorization-calibration/v3"
+MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION = "memorization-calibration-arm/v2"
+POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION = "positive-canary-audit-context/v3"
+POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION = "positive-canary-audit-checkpoint/v3"
+POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION = "positive-canary-audit-result/v3"
+POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION = "positive-canary-audit-journal/v3"
 CALIBRATION_SEED = 101
-CALIBRATION_REPETITIONS = (1, 5, 10, 20)
+CALIBRATION_REPETITIONS = (20, 40, 80, 160)
 CALIBRATION_CLIENT_ID = "positive-canary-01"
 CALIBRATION_DATASET_ID = "positive-canaries-seed-101-v1"
-CALIBRATION_RUN_ID = "memorization-calibration-greedy-seed-101-v2"
+CALIBRATION_RUN_ID = "memorization-calibration-greedy-seed-101-v3"
 EXPECTED_MAIN_CONFIG_SHA256 = (
     "18e066855ad147c7cc31bdd6221b62275eb8a6c44e0158e83cb610d3b4298d87"
 )
@@ -248,8 +248,8 @@ def validate_memorization_calibration_spec(
         or spec.repetitions != CALIBRATION_REPETITIONS
         or spec.conversations_per_repetition != 100
         or spec.optimizer_steps_per_repetition != 25
-        or spec.expected_total_conversation_presentations != 3_600
-        or spec.expected_total_optimizer_steps != 900
+        or spec.expected_total_conversation_presentations != 30_000
+        or spec.expected_total_optimizer_steps != 7_500
         or spec.audit_generations_per_model != 181
         or spec.expected_total_audit_generations != 905
         or spec.distinctive_exact_pair_threshold != 10
@@ -354,6 +354,9 @@ def load_memorization_calibration_spec_from_config(
 
 def validate_memorization_calibration_arm_result(
     result: object,
+    *,
+    allowed_repetitions: Tuple[int, ...] = CALIBRATION_REPETITIONS,
+    expected_schema_version: str = MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION,
 ) -> MemorizationCalibrationArmResult:
     if not isinstance(result, MemorizationCalibrationArmResult):
         raise MemorizationCalibrationError("resultado do braço é inválido")
@@ -371,10 +374,10 @@ def validate_memorization_calibration_arm_result(
         result.max_gradient_norm,
     )
     if (
-        result.schema_version != MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION
+        result.schema_version != expected_schema_version
         or any(type(value) is not int for value in integer_fields)
         or any(type(value) is not float for value in metric_fields)
-        or result.repetitions not in CALIBRATION_REPETITIONS
+        or result.repetitions not in allowed_repetitions
         or result.conversation_presentations != result.repetitions * 100
         or result.optimizer_steps != result.repetitions * 25
         or result.supervised_token_presentations <= 0
@@ -396,6 +399,9 @@ def validate_memorization_calibration_arm_result(
 
 def validate_positive_canary_audit_result(
     result: object,
+    *,
+    allowed_repetitions: Tuple[int, ...] = CALIBRATION_REPETITIONS,
+    expected_schema_version: str = POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION,
 ) -> PositiveCanaryAuditResult:
     if not isinstance(result, PositiveCanaryAuditResult):
         raise MemorizationCalibrationError("resultado da auditoria canária é inválido")
@@ -432,9 +438,9 @@ def validate_positive_canary_audit_result(
         result.untargeted_exposed_profile_count,
     )
     if (
-        result.schema_version != POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION
+        result.schema_version != expected_schema_version
         or any(type(value) is not int for value in integer_fields)
-        or result.repetitions not in {0, *CALIBRATION_REPETITIONS}
+        or result.repetitions not in {0, *allowed_repetitions}
         or result.checkpoint_id
         != (
             "baseline"

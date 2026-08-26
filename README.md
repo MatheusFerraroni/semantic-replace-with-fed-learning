@@ -16,6 +16,7 @@ A campanha principal e as defesas continuam pendentes.
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
 - [Configuração oficial greedy da campanha](configs/main-v2.yaml)
+- [Configuração da calibração greedy ampliada](configs/memorization-calibration-v3.yaml)
 - [Configuração sampling v1 (histórica, somente leitura)](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
@@ -317,10 +318,11 @@ ao orquestrador do piloto.
 
 ## Executar ou retomar o piloto B0/F0/F1
 
-Antes do piloto, a ordem obrigatória é: preflight da calibração v2, calibração
-completa, revisão de `calibrated=true` com baseline reprovado, preflight do
-piloto e só então piloto completo. Se o gate falhar, pare; não aumente doses ou
-altere a receita sem criar um protocolo versionado.
+O piloto v2 continua ligado ao gate histórico da calibração v2, que terminou
+com `calibrated=false`, e portanto permanece bloqueado. A calibração ampliada v3
+deve ser concluída e revisada primeiro; mesmo que passe, a integração do novo
+gate ao piloto será uma alteração versionada posterior. Não submeta o launcher
+do piloto nesta etapa.
 
 O piloto greedy v2 usa seed `101`, `k=1`, audita B0 uma vez, percorre F0 por 20
 rodadas, recarrega o baseline e percorre F1 por 20 rodadas. O orçamento de 20
@@ -407,10 +409,11 @@ ou reproduz a rodada incompleta.
 
 ## Calibrar memorização com canários completos
 
-A calibração é independente do piloto finalizado. Ela gera 20 perfis-canário
-disjuntos, treina quatro braços partindo do mesmo baseline com 1, 5, 10 e 20
-repetições do bundle de 100 conversas e audita o baseline e os quatro modelos.
-São 3.600 apresentações, 900 passos AdamW e 905 gerações greedy no total.
+A calibração ampliada v3 é independente do piloto. Ela reutiliza os mesmos 20
+perfis-canário disjuntos e treina quatro braços partindo do mesmo baseline com
+20, 40, 80 e 160 repetições do bundle de 100 conversas. São 30.000
+apresentações, 7.500 passos AdamW e 905 gerações greedy no total. A dose 20 é
+repetida como âncora de regressão da v2.
 
 Valide primeiro, sem escrever:
 
@@ -418,7 +421,7 @@ Valide primeiro, sem escrever:
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_memorization_calibration \
-  --config configs/memorization-calibration-v2.yaml \
+  --config configs/memorization-calibration-v3.yaml \
   --device cuda \
   --preflight-only
 ```
@@ -431,11 +434,11 @@ sbatch scripts/run_memorization_calibration_l40s.sbatch start
 sbatch scripts/run_memorization_calibration_l40s.sbatch resume
 ```
 
-`start` cria `memorization-calibration-greedy-seed-101-v2`; `resume` revalida
+`start` cria `memorization-calibration-greedy-seed-101-v3`; `resume` revalida
 braços, checkpoints e auditorias já publicados. A calibração só libera o piloto
-quando algum braço atinge o limiar e o baseline não. Caso contrário,
-`calibrated=false` bloqueia o piloto e o desenvolvimento das defesas até uma
-nova decisão de protocolo. Consulte
+depois de uma integração versionada adicional, quando algum braço atinge o
+limiar e o baseline não. Caso contrário, `calibrated=false` mantém bloqueados o
+piloto e o desenvolvimento das defesas até uma nova decisão de protocolo. Consulte
 [`docs/memorization-calibration.md`](docs/memorization-calibration.md).
 
 ## Gerar um dataset para inspeção

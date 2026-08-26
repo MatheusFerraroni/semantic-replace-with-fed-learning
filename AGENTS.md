@@ -152,9 +152,9 @@ todos os parâmetros do Tucano 2 0.6B.
   de F1 e 20 rodadas por trajetória. Auditar 20 alvos em B0 e após cada rodada;
   auditar também 1, 5 e 200 alvos em B0 e na rodada 20 de F0/F1. Não congelar a
   receita principal sem revisão humana explícita.
-- Manter artefatos sampling v1 imutáveis e somente para inspeção histórica.
-  Runners, journals, checkpoints e diretórios greedy v2 não podem retomar,
-  migrar nem combinar resultados v1.
+- Manter artefatos sampling v1 e a calibração greedy v2 imutáveis e somente
+  para inspeção histórica. O runner da calibração v3 não pode retomar, migrar
+  nem combinar configurações, journals, checkpoints ou diretórios anteriores.
 - Ao retomar o piloto, validar a continuidade de cada prefixo confirmado e de
   cada checkpoint: rodada 1 parte do baseline compartilhado e toda rodada
   posterior parte do estado final anterior do mesmo cenário.
@@ -163,8 +163,9 @@ todos os parâmetros do Tucano 2 0.6B.
   sem otimizadores, deltas, tokens, textos ou registros protegidos.
 - Reiniciar e reexecutar todos os cenários quando o artefato inicial mudar.
 - Calibrar a capacidade de memorização em execução separada com seed `101`, 20
-  perfis-canário completos e disjuntos e braços independentes de 1, 5, 10 e 20
-  repetições, todos partindo do mesmo baseline pinado.
+  perfis-canário completos e disjuntos e braços independentes de 20, 40, 80 e
+  160 repetições, todos partindo do mesmo baseline pinado. Repetir a dose 20
+  como âncora de regressão da calibração greedy v2.
 - Manter um único AdamW dentro de cada braço canário e reiniciá-lo entre braços.
   A dose não entra na derivação da seed nem na ordem das 100 conversas, de modo
   que braços maiores preservem o prefixo de treinamento dos menores.
@@ -173,9 +174,10 @@ todos os parâmetros do Tucano 2 0.6B.
   distintivos exatos distribuídos por pelo menos cinco canários; executar todas
   as doses e registrar resultado negativo sem escalada automática.
 - Manter dados, checkpoints e artefatos privados da calibração separados do
-  piloto e da campanha. O piloto greedy exige um braço aprovado e o baseline
-  reprovado. `calibrated=false` ou `baseline_gate_passed=true` bloqueia o piloto
-  e o desenvolvimento das defesas até decisão explícita de protocolo.
+  piloto e da campanha. O piloto greedy exige um braço aprovado, o baseline
+  reprovado e uma integração versionada explícita do gate vigente.
+  `calibrated=false` ou `baseline_gate_passed=true` bloqueia o piloto e o
+  desenvolvimento das defesas até decisão explícita de protocolo.
 
 ## Regras de implementação
 

@@ -24,6 +24,7 @@ from .audit_prompts import (
 )
 from .calibration_contracts import (
     CALIBRATION_CLIENT_ID,
+    CALIBRATION_REPETITIONS,
     DISTINCTIVE_FIELD_TYPES,
     POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION,
     POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION,
@@ -297,7 +298,7 @@ def score_positive_canary_audit(
         or checkpoint.schema_version
         != POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION
         or checkpoint.experiment_seed != context.experiment_seed
-        or checkpoint.repetitions not in {0, 1, 5, 10, 20}
+        or checkpoint.repetitions not in {0, *CALIBRATION_REPETITIONS}
         or checkpoint.checkpoint_id
         != (
             "baseline"
@@ -698,7 +699,7 @@ def run_positive_canary_audit(
     if (
         checkpoint.schema_version != POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION
         or checkpoint.experiment_seed != context.experiment_seed
-        or checkpoint.repetitions not in {0, 1, 5, 10, 20}
+        or checkpoint.repetitions not in {0, *CALIBRATION_REPETITIONS}
         or checkpoint.model_provenance != model_bundle.provenance
     ):
         raise MemorizationCalibrationError("checkpoint do avaliador canário é inválido")

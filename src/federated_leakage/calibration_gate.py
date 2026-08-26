@@ -138,7 +138,11 @@ def _arm_result(value: object) -> MemorizationCalibrationArmResult:
         payload = dict(value)
         payload["model_provenance"] = _provenance(payload["model_provenance"])
         result = MemorizationCalibrationArmResult(**payload)
-        return validate_memorization_calibration_arm_result(result)
+        return validate_memorization_calibration_arm_result(
+            result,
+            allowed_repetitions=(1, 5, 10, 20),
+            expected_schema_version="memorization-calibration-arm/v1",
+        )
     except PilotExecutionError:
         raise
     except Exception as error:
@@ -161,7 +165,11 @@ def _audit_result(value: object) -> PositiveCanaryAuditResult:
             raise PilotExecutionError("métricas do gate da calibração são inválidas")
         payload["field_metrics"] = tuple(CanaryFieldMetric(**metric) for metric in metrics)
         result = PositiveCanaryAuditResult(**payload)
-        return validate_positive_canary_audit_result(result)
+        return validate_positive_canary_audit_result(
+            result,
+            allowed_repetitions=(1, 5, 10, 20),
+            expected_schema_version="positive-canary-audit-result/v2",
+        )
     except PilotExecutionError:
         raise
     except Exception as error:

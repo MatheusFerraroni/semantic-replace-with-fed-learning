@@ -26,7 +26,7 @@ from .model_updates import (
 )
 
 
-CALIBRATION_CHECKPOINT_SCHEMA_VERSION = "memorization-calibration-checkpoint/v1"
+CALIBRATION_CHECKPOINT_SCHEMA_VERSION = "memorization-calibration-checkpoint/v2"
 _FILES = frozenset({"metadata.json", "model.safetensors"})
 
 

@@ -2,9 +2,10 @@
 
 ## Escopo implementado
 
-Este runner só é liberado depois de concluir e aprovar a calibração greedy v2.
-A ordem operacional é calibração preflight → calibração completa → revisão do
-gate → piloto preflight → piloto completo. Um gate negativo interrompe o fluxo.
+Este runner ainda exige a calibração greedy v2, cujo gate concluído foi
+negativo, e portanto permanece bloqueado. A calibração ampliada v3 não altera
+essa ligação: se ela passar, uma mudança versionada posterior deverá integrar o
+novo gate antes de qualquer preflight ou execução do piloto.
 
 O comando `federated_leakage.run_pilot` executa exclusivamente o piloto de
 desenvolvimento não privado fixado em `configs/main-v2.yaml`:
@@ -57,11 +58,12 @@ python -m federated_leakage.run_pilot \
 
 `--preflight-only` não cria datasets, diretórios da execução, auditorias ou
 checkpoints. Antes dele, o runner exige o marcador concluído da calibração
-`memorization-calibration-greedy-seed-101-v2`: algum braço deve ter passado o
-gate e o baseline não. O resultado, manifesto, dataset canário, preflight de
-colisões, estratégia, baseline e proveniência devem coincidir com a configuração
-v2. O dispositivo solicitado deve existir; não há fallback
-para CPU.
+`memorization-calibration-greedy-seed-101-v2`: algum braço teria de passar o
+gate e o baseline não. O marcador observado possui `calibrated=false`, portanto
+esse comando falha antes da execução. O resultado, manifesto, dataset canário,
+preflight de colisões, estratégia, baseline e proveniência devem coincidir com a
+configuração v2. O dispositivo solicitado deve existir; não há fallback para
+CPU.
 
 ## Execução e retomada
 

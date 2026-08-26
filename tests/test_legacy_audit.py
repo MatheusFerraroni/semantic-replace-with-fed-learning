@@ -7,6 +7,7 @@ from pathlib import Path
 from federated_leakage.audit_contracts import ExtractionAuditError
 from federated_leakage.legacy_audit import (
     read_legacy_extraction_audit_summary,
+    read_legacy_greedy_memorization_calibration_v2_summary,
     read_legacy_memorization_calibration_summary,
     read_legacy_pilot_summary,
 )
@@ -81,6 +82,18 @@ class LegacyAuditReaderTests(unittest.TestCase):
         self.assertEqual(
             hashlib.sha256(Path("configs/main-v1.yaml").read_bytes()).hexdigest(),
             "51921b75647ae8dfb83161a60cd8b2698ce3cfbadcdde6dd8e6acbeb6474643e",
+        )
+
+    def test_historical_greedy_v2_configs_remain_frozen(self):
+        self.assertEqual(
+            hashlib.sha256(Path("configs/main-v2.yaml").read_bytes()).hexdigest(),
+            "18e066855ad147c7cc31bdd6221b62275eb8a6c44e0158e83cb610d3b4298d87",
+        )
+        self.assertEqual(
+            hashlib.sha256(
+                Path("configs/memorization-calibration-v2.yaml").read_bytes()
+            ).hexdigest(),
+            "5f9a9b43275765bcbc6f472e893e3aa334bb7258a738d47561921f99beea0719",
         )
 
     def test_reads_sampling_v1_only_for_strict_historical_inspection(self):
@@ -166,6 +179,62 @@ class LegacyAuditReaderTests(unittest.TestCase):
             _write(path, payload)
             with self.assertRaises(ExtractionAuditError):
                 read_legacy_pilot_summary(path)
+
+    def test_reads_greedy_calibration_v2_only_for_historical_inspection(self):
+        payload = {
+            "schema_version": "memorization-calibration/v2",
+            "experiment_seed": 101,
+            "run_id": "memorization-calibration-greedy-seed-101-v2",
+            "dataset_id": "positive-canaries-seed-101-v1",
+            "baseline_model_sha256": "1" * 64,
+            "arms": [
+                {
+                    "schema_version": "memorization-calibration-arm/v1",
+                    "repetitions": repetitions,
+                }
+                for repetitions in (1, 5, 10, 20)
+            ],
+            "audits": [
+                {
+                    "schema_version": "positive-canary-audit-result/v2",
+                    "repetitions": repetitions,
+                    "generation_count": 181,
+                    "decoding_strategy": "tokenwise_greedy_argmax/v1",
+                    "rng_used": False,
+                }
+                for repetitions in (0, 1, 5, 10, 20)
+            ],
+            "total_conversation_presentations": 3_600,
+            "total_optimizer_steps": 900,
+            "total_audit_generations": 905,
+            "baseline_gate_passed": False,
+            "calibrated": False,
+            "first_successful_repetition": None,
+        }
+        canonical = (
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            + b"\n"
+        )
+        payload["result_sha256"] = hashlib.sha256(
+            b"memorization-calibration-result/v2\0" + canonical
+        ).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "completed.json"
+            _write(path, payload)
+            self.assertEqual(
+                read_legacy_greedy_memorization_calibration_v2_summary(path),
+                payload,
+            )
+            payload["total_optimizer_steps"] = 901
+            _write(path, payload)
+            with self.assertRaises(ExtractionAuditError):
+                read_legacy_greedy_memorization_calibration_v2_summary(path)
 
 
 if __name__ == "__main__":

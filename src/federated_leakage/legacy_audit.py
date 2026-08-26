@@ -1,7 +1,8 @@
-"""Leitura estrita e somente leitura dos resumos amostrados v1."""
+"""Leitura estrita e somente leitura dos resumos históricos v1/v2."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -87,6 +88,9 @@ _LEGACY_CALIBRATION_KEYS = frozenset(
         "first_successful_repetition",
         "result_sha256",
     }
+)
+_GREEDY_CALIBRATION_V2_KEYS = _LEGACY_CALIBRATION_KEYS | frozenset(
+    {"baseline_gate_passed"}
 )
 _LEGACY_PILOT_KEYS = frozenset(
     {
@@ -241,6 +245,64 @@ def read_legacy_memorization_calibration_summary(path: Path) -> Mapping[str, Any
     return value
 
 
+def read_legacy_greedy_memorization_calibration_v2_summary(
+    path: Path,
+) -> Mapping[str, Any]:
+    """Valida a calibração greedy v2 concluída sem habilitar sua retomada."""
+
+    value = _load(path)
+    _reject_private(value)
+    arms = value.get("arms")
+    audits = value.get("audits")
+    safe_without_hash = dict(value)
+    result_sha256 = safe_without_hash.pop("result_sha256", None)
+    expected_hash = hashlib.sha256(
+        b"memorization-calibration-result/v2\0" + _canonical(safe_without_hash)
+    ).hexdigest()
+    if (
+        set(value) != _GREEDY_CALIBRATION_V2_KEYS
+        or value.get("schema_version") != "memorization-calibration/v2"
+        or value.get("run_id") != "memorization-calibration-greedy-seed-101-v2"
+        or value.get("experiment_seed") != 101
+        or value.get("dataset_id") != "positive-canaries-seed-101-v1"
+        or not _is_sha256(value.get("baseline_model_sha256"))
+        or result_sha256 != expected_hash
+        or value.get("total_conversation_presentations") != 3_600
+        or value.get("total_optimizer_steps") != 900
+        or value.get("total_audit_generations") != 905
+        or type(value.get("baseline_gate_passed")) is not bool
+        or type(value.get("calibrated")) is not bool
+        or value.get("first_successful_repetition") not in {None, 1, 5, 10, 20}
+        or not isinstance(arms, list)
+        or len(arms) != 4
+        or not isinstance(audits, list)
+        or len(audits) != 5
+        or tuple(
+            item.get("repetitions") if isinstance(item, Mapping) else None
+            for item in arms
+        )
+        != (1, 5, 10, 20)
+        or tuple(
+            item.get("repetitions") if isinstance(item, Mapping) else None
+            for item in audits
+        )
+        != (0, 1, 5, 10, 20)
+        or any(
+            item.get("schema_version") != "memorization-calibration-arm/v1"
+            for item in arms
+        )
+        or any(
+            item.get("schema_version") != "positive-canary-audit-result/v2"
+            or item.get("generation_count") != 181
+            or item.get("decoding_strategy") != "tokenwise_greedy_argmax/v1"
+            or item.get("rng_used") is not False
+            for item in audits
+        )
+    ):
+        raise ExtractionAuditError("calibração histórica greedy v2 diverge")
+    return value
+
+
 def read_legacy_pilot_summary(path: Path) -> Mapping[str, Any]:
     """Valida o marcador final do piloto sampling v1 sem permitir retomada."""
 
@@ -287,6 +349,7 @@ def read_legacy_pilot_summary(path: Path) -> Mapping[str, Any]:
 
 __all__ = [
     "read_legacy_extraction_audit_summary",
+    "read_legacy_greedy_memorization_calibration_v2_summary",
     "read_legacy_memorization_calibration_summary",
     "read_legacy_pilot_summary",
 ]

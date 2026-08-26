@@ -25,6 +25,7 @@ from .audit_contracts import (
 from .calibration_gate import CalibrationGate, load_completed_calibration_gate
 from .legacy_audit import (
     read_legacy_extraction_audit_summary,
+    read_legacy_greedy_memorization_calibration_v2_summary,
     read_legacy_memorization_calibration_summary,
     read_legacy_pilot_summary,
 )
@@ -319,6 +320,7 @@ __all__ = [
     "run_memorization_calibration",
     "run_positive_canary_audit",
     "read_legacy_extraction_audit_summary",
+    "read_legacy_greedy_memorization_calibration_v2_summary",
     "read_legacy_memorization_calibration_summary",
     "read_legacy_pilot_summary",
     "save_calibration_checkpoint",

@@ -300,7 +300,7 @@ def _safe_arm_completed_payload(
     checkpoint_sha256: str,
 ) -> dict[str, Any]:
     return {
-        "schema_version": "memorization-calibration-arm-completed/v2",
+        "schema_version": "memorization-calibration-arm-completed/v3",
         "repetitions": arm.repetitions,
         "checkpoint_artifact_sha256": checkpoint_sha256,
         "arm_result": arm.as_safe_dict(),
@@ -599,12 +599,12 @@ def run_memorization_calibration(
         calibrated=calibrated,
         first_successful_repetition=first_successful,
         result_sha256=_hash(
-            safe_without_hash, b"memorization-calibration-result/v2"
+            safe_without_hash, b"memorization-calibration-result/v3"
         ),
     )
     if (
-        result.total_conversation_presentations != 3_600
-        or result.total_optimizer_steps != 900
+        result.total_conversation_presentations != 30_000
+        or result.total_optimizer_steps != 7_500
         or result.total_audit_generations != 905
     ):
         raise MemorizationCalibrationError("totais finais da calibração divergem")

@@ -640,9 +640,10 @@ tokens.
 O controle positivo com canários roda separadamente e nunca altera B0 ou F0-F5.
 A implementação vulnerável usa seed de desenvolvimento `101`, 20 perfis-canário
 completos e disjuntos e o mesmo bundle 80/20 das vítimas, sempre com perda
-integral. Quatro braços independentes partem do baseline pinado e repetem o
-bundle 1, 5, 10 ou 20 vezes, mantendo um AdamW contínuo somente dentro do braço.
-Isso produz 25, 125, 250 e 500 passos, respectivamente.
+integral. A calibração ativa v3 usa quatro braços independentes que partem do
+baseline pinado e repetem o bundle 20, 40, 80 ou 160 vezes, mantendo um AdamW
+contínuo somente dentro do braço. Isso produz 500, 1.000, 2.000 e 4.000 passos,
+respectivamente. A dose 20 é uma âncora de regressão da calibração greedy v2.
 
 O baseline e os quatro braços são auditados com os mesmos 20 alvos e prompts,
 181 gerações greedy por modelo. A calibração é positiva quando ao menos 10 pares
@@ -651,13 +652,13 @@ por pelo menos cinco canários. Todos os braços são executados mesmo após o
 primeiro sucesso. Ela só libera o piloto quando ao menos um braço passa e o
 baseline não; `baseline_gate_passed=true` força `calibrated=false`. Um resultado
 negativo é conclusão operacional válida, mas bloqueia o piloto e a promoção para
-as defesas e exige nova decisão de protocolo. No total são 905 gerações, 3.600
-apresentações de conversa e 900 passos.
+as defesas e exige nova decisão de protocolo. No total são 905 gerações, 30.000
+apresentações de conversa e 7.500 passos.
 
 Os artefatos usam contratos paralelos e não alteram os schemas B0/F0/F1. Cada
 braço preserva seu checkpoint `safetensors`; o registro canário e as gerações
 brutas permanecem somente na área privada do avaliador. O launcher Slurm
-`scripts/run_memorization_calibration_l40s.sbatch` fixa uma L40S por oito horas,
+`scripts/run_memorization_calibration_l40s.sbatch` fixa uma L40S por 24 horas,
 ambiente offline e os modos explícitos `preflight`, `start` e `resume`.
 
 Antes da campanha principal, uma semente de desenvolvimento executa B0, F0 e F1
@@ -665,9 +666,10 @@ com seed `101` e `k=1`. O orçamento de referência de 20 participantes-alvo rod
 em B0 e após cada uma das 20 rodadas de F0/F1; 1, 5 e 200 alvos são adicionados
 somente em B0 e na rodada 20 de cada trajetória. Os conjuntos são aninhados e a
 seleção de 20 permanece balanceada em dois alvos por cliente. Isso totaliza
-12.992 gerações: 2.038 em B0 e 5.477 por trajetória. O piloto v2 exige antes de
-qualquer preflight ou treinamento o marcador aprovado da calibração greedy v2,
-com o mesmo baseline, proveniência, seed, estratégia e hashes. Depois do piloto,
+12.992 gerações: 2.038 em B0 e 5.477 por trajetória. O piloto v2 ainda exige o
+marcador da calibração greedy v2, que terminou com gate negativo, e permanece
+bloqueado. Uma calibração v3 positiva exige integração versionada posterior;
+ela não libera silenciosamente o runner atual. Depois do piloto,
 a receita só pode ser congelada após revisão
 humana; a execução não altera a configuração automaticamente. A seed de
 desenvolvimento não entra nos resultados.
@@ -682,8 +684,9 @@ offline antes do Python e serializa submissões pela dependência `singleton`.
 
 Os resultados sampling v1, inclusive
 `memorization-calibration-seed-101-v1` e `pilot-seed-101-k01`, permanecem
-imutáveis para inspeção histórica. Leitores legados são somente leitura; runners,
-journals, checkpoints e diretórios v2 recusam qualquer mistura ou retomada v1.
+imutáveis para inspeção histórica. A calibração greedy v2 concluída também é
+somente leitura. O runner ativo v3 recusa configurações, journals, checkpoints
+e diretórios v1/v2.
 
 Os logs `slurm-%x-%j.out` e `slurm-%x-%j.err` ficam na raiz ignorada pelo Git.
 Não há requeue automático. Depois de `TIMEOUT`, o operador verifica `sacct` e os
