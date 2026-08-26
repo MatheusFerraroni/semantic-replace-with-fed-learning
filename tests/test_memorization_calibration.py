@@ -22,6 +22,7 @@ from federated_leakage.calibration_checkpointing import (
 )
 from federated_leakage.calibration_gate import load_completed_calibration_gate
 from federated_leakage.calibration_contracts import (
+    CALIBRATION_LEARNING_RATE_ARMS,
     MemorizationCalibrationError,
     PositiveCanaryAuditCheckpoint,
     load_memorization_calibration_spec_from_config,
@@ -52,6 +53,7 @@ from federated_leakage.execution_contracts import (
 )
 from federated_leakage.memorization_calibration import (
     _calibration_outcome,
+    _validate_anchor_regression,
     run_memorization_calibration,
 )
 from federated_leakage.synthetic_profiles import (
@@ -67,6 +69,9 @@ from federated_leakage.synthetic_profiles import (
 from federated_leakage.synthetic_profiles.validation import ConversationValidationError
 from federated_leakage.tokenization import TokenizedConversation
 from federated_leakage.training_contracts import load_local_training_spec_from_config
+
+
+ANCHOR_ARM = CALIBRATION_LEARNING_RATE_ARMS[0]
 
 
 def _provenance():
@@ -154,12 +159,16 @@ def _samples():
 class CanaryGenerationAndConfigTests(unittest.TestCase):
     def test_fixed_config_and_complete_disjoint_bundle(self):
         spec = load_memorization_calibration_spec_from_config(
-            Path("configs/memorization-calibration-v3.yaml")
+            Path("configs/memorization-calibration-v4.yaml")
         )
-        self.assertEqual(spec.repetitions, (20, 40, 80, 160))
+        self.assertEqual(spec.fixed_repetitions, 160)
+        self.assertEqual(
+            tuple(item.learning_rate_millionths for item in spec.learning_rate_arms),
+            (10, 30, 100, 300),
+        )
         with self.assertRaises(MemorizationCalibrationError):
             load_memorization_calibration_spec_from_config(
-                Path("configs/memorization-calibration-v2.yaml")
+                Path("configs/memorization-calibration-v3.yaml")
             )
         first = PositiveCanaryDatasetGenerator(101).generate()
         second = PositiveCanaryDatasetGenerator(101).generate()
@@ -218,20 +227,78 @@ class CanaryGenerationAndConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "main-v2.yaml").write_text("changed: true\n", encoding="utf-8")
-            text = Path("configs/memorization-calibration-v3.yaml").read_text()
+            text = Path("configs/memorization-calibration-v4.yaml").read_text()
             (root / "calibration.yaml").write_text(text, encoding="utf-8")
             with self.assertRaisesRegex(MemorizationCalibrationError, "hash"):
                 load_memorization_calibration_spec_from_config(root / "calibration.yaml")
+
+    def test_historical_v3_configuration_is_frozen(self):
+        self.assertEqual(
+            hashlib.sha256(
+                Path("configs/memorization-calibration-v3.yaml").read_bytes()
+            ).hexdigest(),
+            "133f1641288a71ed2ad724aac2c53ce851e3cff8896277a0e588386554739199",
+        )
 
 
 class CanaryTrainingAndCheckpointTests(unittest.TestCase):
     def test_baseline_gate_blocks_promotion_even_when_an_arm_passes(self):
         audits = (
-            SimpleNamespace(repetitions=0, calibrated_at_checkpoint=True),
-            SimpleNamespace(repetitions=20, calibrated_at_checkpoint=True),
-            SimpleNamespace(repetitions=40, calibrated_at_checkpoint=False),
+            SimpleNamespace(
+                repetitions=0,
+                arm_id=None,
+                learning_rate_millionths=None,
+                calibrated_at_checkpoint=True,
+            ),
+            SimpleNamespace(
+                repetitions=160,
+                arm_id="lr-000010",
+                learning_rate_millionths=10,
+                calibrated_at_checkpoint=True,
+            ),
+            SimpleNamespace(
+                repetitions=160,
+                arm_id="lr-000030",
+                learning_rate_millionths=30,
+                calibrated_at_checkpoint=False,
+            ),
+            SimpleNamespace(
+                repetitions=160,
+                arm_id="lr-000100",
+                learning_rate_millionths=100,
+                calibrated_at_checkpoint=False,
+            ),
+            SimpleNamespace(
+                repetitions=160,
+                arm_id="lr-000300",
+                learning_rate_millionths=300,
+                calibrated_at_checkpoint=False,
+            ),
         )
-        self.assertEqual(_calibration_outcome(audits), (True, False, 20))
+        self.assertEqual(
+            _calibration_outcome(audits),
+            (True, False, "lr-000010", 10),
+        )
+
+    def test_real_anchor_fingerprint_is_fail_closed(self):
+        spec = load_memorization_calibration_spec_from_config(
+            Path("configs/memorization-calibration-v4.yaml")
+        )
+        bundle = dataclasses.replace(
+            _bundle(),
+            provenance=dataclasses.replace(_provenance(), parameter_count=670_127_616),
+        )
+        with mock.patch(
+            "federated_leakage.memorization_calibration.EXPECTED_PARAMETER_COUNT",
+            670_127_616,
+        ):
+            with self.assertRaisesRegex(MemorizationCalibrationError, "âncora"):
+                _validate_anchor_regression(
+                    spec,
+                    bundle,
+                    ANCHOR_ARM,
+                    SimpleNamespace(final_model_sha256="0" * 64),
+                )
 
     def test_arm_keeps_one_recipe_and_checkpoint_round_trips(self):
         bundle = _bundle()
@@ -242,15 +309,13 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
         ):
             baseline = capture_model_parameter_snapshot(bundle)
             result = train_memorization_calibration_arm(
-                _samples(), bundle, spec, seed=101, repetitions=20,
+                _samples(), bundle, spec, seed=101, arm=ANCHOR_ARM,
                 baseline_snapshot=baseline,
             )
-            self.assertEqual(result.optimizer_steps, 500)
-            self.assertEqual(result.conversation_presentations, 2_000)
-            self.assertEqual(
-                result.final_model_sha256,
-                "b43a014d750466635f4bc196122a3bc8383ce72b6d264cf4fda9b2e3ef1431b6",
-            )
+            self.assertEqual(result.optimizer_steps, 4_000)
+            self.assertEqual(result.conversation_presentations, 16_000)
+            self.assertEqual(result.arm_id, "lr-000010")
+            self.assertEqual(result.learning_rate_millionths, 10)
             self.assertEqual(
                 result.sample_order_sha256,
                 "0ac3131528143b36ce498d66816714c9212e1b9d1a49643536e55becbe36a8e6",
@@ -260,7 +325,7 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 "0be6c4e2c6ac3b3a68178bbda2d2daf14bf83dadd58a289c8d3129e937cb391e",
             )
             with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "repetitions-020" / "checkpoint"
+                path = Path(directory) / "lr-000010" / "checkpoint"
                 artifact = save_calibration_checkpoint(
                     path,
                     bundle,
@@ -272,7 +337,9 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 loaded, loaded_artifact = load_calibration_checkpoint(
                     path,
                     bundle,
-                    expected_repetitions=20,
+                    expected_arm_id="lr-000010",
+                    expected_learning_rate_millionths=10,
+                    expected_repetitions=160,
                     expected_main_config_sha256="5" * 64,
                     expected_dataset_sha256="6" * 64,
                 )
@@ -280,61 +347,66 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 self.assertEqual(artifact, loaded_artifact)
                 self.assertEqual(fingerprint_model_parameters(bundle), result.final_model_sha256)
 
-    def test_larger_arm_has_the_exact_training_prefix_of_the_smaller_arm(self):
+    def test_learning_rate_is_the_only_training_identity_difference(self):
+        from federated_leakage import calibration_training
+
         local_spec = load_local_training_spec_from_config(Path("configs/main-v2.yaml"))
-        twenty_bundle = _bundle()
-        forty_bundle = _bundle()
+        anchor_bundle = _bundle()
+        changed_bundle = _bundle()
         with (
             mock.patch("federated_leakage.model_updates.EXPECTED_PARAMETER_COUNT", 1),
             mock.patch("federated_leakage.local_training.EXPECTED_VOCAB_SIZE", 4),
         ):
-            twenty_snapshot = capture_model_parameter_snapshot(twenty_bundle)
-            twenty_result = train_memorization_calibration_arm(
-                _samples(),
-                twenty_bundle,
-                local_spec,
-                seed=101,
-                repetitions=20,
-                baseline_snapshot=twenty_snapshot,
+            anchor_snapshot = capture_model_parameter_snapshot(anchor_bundle)
+            original_optimizer = (
+                calibration_training._create_adamw_optimizer_for_learning_rate
             )
-            twenty_weight = twenty_bundle.model.weight.detach().clone()
-            forty_snapshot = capture_model_parameter_snapshot(forty_bundle)
-            from federated_leakage import calibration_training
-
-            original_batch = calibration_training._run_logical_batch
-            prefix_weights = []
-
-            def track_batch(*args, **kwargs):
-                outcome = original_batch(*args, **kwargs)
-                if len(prefix_weights) < 500:
-                    prefix_weights.append(forty_bundle.model.weight.detach().clone())
-                return outcome
-
             with mock.patch(
-                "federated_leakage.calibration_training._run_logical_batch",
-                side_effect=track_batch,
-            ):
-                forty_result = train_memorization_calibration_arm(
+                "federated_leakage.calibration_training."
+                "_create_adamw_optimizer_for_learning_rate",
+                wraps=original_optimizer,
+            ) as optimizer:
+                anchor_result = train_memorization_calibration_arm(
                     _samples(),
-                    forty_bundle,
+                    anchor_bundle,
                     local_spec,
                     seed=101,
-                    repetitions=40,
-                    baseline_snapshot=forty_snapshot,
+                    arm=CALIBRATION_LEARNING_RATE_ARMS[0],
+                    baseline_snapshot=anchor_snapshot,
                 )
-            self.assertTrue(torch.equal(twenty_weight, prefix_weights[-1]))
+                self.assertEqual(optimizer.call_args.kwargs["learning_rate"], 1e-5)
+            changed_snapshot = capture_model_parameter_snapshot(changed_bundle)
+            with mock.patch(
+                "federated_leakage.calibration_training."
+                "_create_adamw_optimizer_for_learning_rate",
+                wraps=original_optimizer,
+            ) as optimizer:
+                changed_result = train_memorization_calibration_arm(
+                    _samples(),
+                    changed_bundle,
+                    local_spec,
+                    seed=101,
+                    arm=CALIBRATION_LEARNING_RATE_ARMS[1],
+                    baseline_snapshot=changed_snapshot,
+                )
+                self.assertEqual(optimizer.call_args.kwargs["learning_rate"], 3e-5)
             self.assertEqual(
-                twenty_result.training_seed_sha256,
-                forty_result.training_seed_sha256,
+                anchor_result.training_seed_sha256,
+                changed_result.training_seed_sha256,
             )
             self.assertEqual(
-                twenty_result.sample_order_sha256,
-                forty_result.sample_order_sha256,
+                anchor_result.sample_order_sha256,
+                changed_result.sample_order_sha256,
             )
+            self.assertEqual(
+                anchor_result.initial_model_sha256,
+                changed_result.initial_model_sha256,
+            )
+            self.assertEqual(anchor_result.repetitions, changed_result.repetitions)
 
     def test_full_small_run_is_idempotent_and_resumes_confirmed_arms(self):
         calibration_spec = load_memorization_calibration_spec_from_config(
-            Path("configs/memorization-calibration-v3.yaml")
+            Path("configs/memorization-calibration-v4.yaml")
         )
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -348,19 +420,20 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 fresh=True,
                 bundle_loader=_bundle,
             )
-            self.assertEqual(first.total_optimizer_steps, 7_500)
-            self.assertEqual(first.total_conversation_presentations, 30_000)
+            self.assertEqual(first.total_optimizer_steps, 16_000)
+            self.assertEqual(first.total_conversation_presentations, 64_000)
             self.assertEqual(first.total_audit_generations, 905)
             self.assertFalse(first.baseline_gate_passed)
             self.assertFalse(first.calibrated)
-            self.assertIsNone(first.first_successful_repetition)
-            for repetitions in (20, 40, 80, 160):
+            self.assertIsNone(first.first_successful_arm_id)
+            self.assertIsNone(first.first_successful_learning_rate_millionths)
+            for arm in CALIBRATION_LEARNING_RATE_ARMS:
                 checkpoint = (
                     Path(directory)
                     / "runs"
                     / calibration_spec.default_run_id
                     / "arms"
-                    / f"repetitions-{repetitions:03d}"
+                    / arm.arm_id
                     / "checkpoint"
                     / "model.safetensors"
                 )
@@ -399,7 +472,8 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 }
             )
             payload["calibrated"] = True
-            payload["first_successful_repetition"] = 160
+            payload["first_successful_arm_id"] = "lr-000300"
+            payload["first_successful_learning_rate_millionths"] = 300
             without_hash = dict(payload)
             without_hash.pop("result_sha256")
             canonical = (
@@ -413,7 +487,7 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 + b"\n"
             )
             payload["result_sha256"] = hashlib.sha256(
-                b"memorization-calibration-result/v3\0" + canonical
+                b"memorization-calibration-result/v4\0" + canonical
             ).hexdigest()
             completed_path.write_text(
                 json.dumps(
@@ -436,6 +510,8 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
             v2_arms = []
             for repetitions, arm in zip(v2_repetitions, first.arms):
                 item = arm.as_safe_dict()
+                item.pop("arm_id")
+                item.pop("learning_rate_millionths")
                 supervised_per_repetition = (
                     item["supervised_token_presentations"] // arm.repetitions
                 )
@@ -454,6 +530,8 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
             v2_audits = []
             for repetitions, audit in zip((0, *v2_repetitions), first.audits):
                 item = audit.as_safe_dict()
+                item.pop("arm_id")
+                item.pop("learning_rate_millionths")
                 item.update(
                     {
                         "schema_version": "positive-canary-audit-result/v2",
@@ -549,11 +627,11 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
 
     def test_interrupted_arm_restarts_from_baseline_without_repeating_confirmed_arm(self):
         calibration_spec = load_memorization_calibration_spec_from_config(
-            Path("configs/memorization-calibration-v3.yaml")
+            Path("configs/memorization-calibration-v4.yaml")
         )
 
         def fail_second_arm(*args, **kwargs):
-            if kwargs["repetitions"] == 40:
+            if kwargs["arm"].learning_rate_millionths == 30:
                 raise MemorizationCalibrationError("falha injetada no braço")
             return train_memorization_calibration_arm(*args, **kwargs)
 
@@ -580,7 +658,7 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 / "runs"
                 / calibration_spec.default_run_id
                 / "arms"
-                / "repetitions-020"
+                / "lr-000010"
                 / "completed.json"
             )
             self.assertTrue(confirmed.is_file())
@@ -595,10 +673,13 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                     bundle_loader=_bundle,
                 )
             self.assertEqual(
-                [call.kwargs["repetitions"] for call in trainer.call_args_list],
-                [40, 80, 160],
+                [
+                    call.kwargs["arm"].learning_rate_millionths
+                    for call in trainer.call_args_list
+                ],
+                [30, 100, 300],
             )
-            self.assertEqual(result.total_optimizer_steps, 7_500)
+            self.assertEqual(result.total_optimizer_steps, 16_000)
 
     def test_cuda_contract_fails_before_training_or_orchestration(self):
         cuda_bundle = dataclasses.replace(
@@ -607,12 +688,12 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
         )
         local_spec = load_local_training_spec_from_config(Path("configs/main-v2.yaml"))
         calibration_spec = load_memorization_calibration_spec_from_config(
-            Path("configs/memorization-calibration-v3.yaml")
+            Path("configs/memorization-calibration-v4.yaml")
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(MemorizationCalibrationError, "CUBLAS"):
                 train_memorization_calibration_arm(
-                    (), cuda_bundle, local_spec, seed=101, repetitions=20,
+                    (), cuda_bundle, local_spec, seed=101, arm=ANCHOR_ARM,
                     baseline_snapshot=mock.Mock(),
                 )
             with mock.patch(
@@ -638,6 +719,8 @@ class CanaryAuditScoringTests(unittest.TestCase):
             model_hash = fingerprint_model_parameters(bundle)
             checkpoint = PositiveCanaryAuditCheckpoint(
                 checkpoint_id="baseline",
+                arm_id=None,
+                learning_rate_millionths=None,
                 repetitions=0,
                 experiment_seed=101,
                 expected_model_sha256=model_hash,
@@ -686,6 +769,8 @@ class CanaryAuditScoringTests(unittest.TestCase):
             model_hash = fingerprint_model_parameters(bundle)
             checkpoint = PositiveCanaryAuditCheckpoint(
                 checkpoint_id="baseline",
+                arm_id=None,
+                learning_rate_millionths=None,
                 repetitions=0,
                 experiment_seed=101,
                 expected_model_sha256=model_hash,
@@ -738,8 +823,10 @@ class CanaryAuditScoringTests(unittest.TestCase):
         with mock.patch("federated_leakage.model_updates.EXPECTED_PARAMETER_COUNT", 1):
             model_hash = fingerprint_model_parameters(bundle)
         checkpoint = PositiveCanaryAuditCheckpoint(
-            checkpoint_id="repetitions-020",
-            repetitions=20,
+            checkpoint_id="lr-000010",
+            arm_id="lr-000010",
+            learning_rate_millionths=10,
+            repetitions=160,
             experiment_seed=101,
             expected_model_sha256=model_hash,
             model_provenance=bundle.provenance,

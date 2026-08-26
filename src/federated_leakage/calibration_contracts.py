@@ -14,19 +14,25 @@ from .audit_contracts import GREEDY_DECODING_STRATEGY, ProtectedEntityRecord
 from .synthetic_profiles.storage import validate_storage_component
 
 
-MEMORIZATION_CALIBRATION_SCHEMA_VERSION = "memorization-calibration/v3"
-MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION = "memorization-calibration-arm/v2"
+MEMORIZATION_CALIBRATION_SCHEMA_VERSION = "memorization-calibration/v4"
+MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION = "memorization-calibration-arm/v3"
 POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION = "positive-canary-audit-context/v3"
-POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION = "positive-canary-audit-checkpoint/v3"
-POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION = "positive-canary-audit-result/v3"
-POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION = "positive-canary-audit-journal/v3"
+POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION = "positive-canary-audit-checkpoint/v4"
+POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION = "positive-canary-audit-result/v4"
+POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION = "positive-canary-audit-journal/v4"
 CALIBRATION_SEED = 101
-CALIBRATION_REPETITIONS = (20, 40, 80, 160)
+CALIBRATION_FIXED_REPETITIONS = 160
+CALIBRATION_LEARNING_RATE_MILLIONTHS = (10, 30, 100, 300)
+# Alias somente para imports históricos; o runner v4 usa braços de learning rate.
+CALIBRATION_REPETITIONS = (CALIBRATION_FIXED_REPETITIONS,)
 CALIBRATION_CLIENT_ID = "positive-canary-01"
 CALIBRATION_DATASET_ID = "positive-canaries-seed-101-v1"
-CALIBRATION_RUN_ID = "memorization-calibration-greedy-seed-101-v3"
+CALIBRATION_RUN_ID = "memorization-calibration-greedy-lr-seed-101-v4"
 EXPECTED_MAIN_CONFIG_SHA256 = (
     "18e066855ad147c7cc31bdd6221b62275eb8a6c44e0158e83cb610d3b4298d87"
+)
+EXPECTED_ANCHOR_MODEL_SHA256 = (
+    "d0fbc59b3ce081c21294f9b8c669872f66333c7243233e8123d4bec3838a4e88"
 )
 EXPECTED_CANARY_DATASET_SHA256 = (
     "7f7feaaf39603847a81ee7c4e39519ea41ea162f669813e4664811ecd09da4ba"
@@ -46,13 +52,47 @@ class MemorizationCalibrationError(RuntimeError):
     """A calibração violou o protocolo ou falhou sem resultado parcial."""
 
 
+def learning_rate_arm_id(learning_rate_millionths: int) -> str:
+    if (
+        type(learning_rate_millionths) is not int
+        or learning_rate_millionths not in CALIBRATION_LEARNING_RATE_MILLIONTHS
+    ):
+        raise MemorizationCalibrationError("learning rate da calibração é inválido")
+    return f"lr-{learning_rate_millionths:06d}"
+
+
+def learning_rate_value(learning_rate_millionths: int) -> float:
+    learning_rate_arm_id(learning_rate_millionths)
+    return learning_rate_millionths / 1_000_000
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LearningRateArmSpec:
+    arm_id: str
+    learning_rate_millionths: int
+
+    @property
+    def learning_rate(self) -> float:
+        return learning_rate_value(self.learning_rate_millionths)
+
+
+CALIBRATION_LEARNING_RATE_ARMS = tuple(
+    LearningRateArmSpec(
+        arm_id=learning_rate_arm_id(value),
+        learning_rate_millionths=value,
+    )
+    for value in CALIBRATION_LEARNING_RATE_MILLIONTHS
+)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MemorizationCalibrationSpec:
     experiment_seed: int
     client_id: str
     dataset_id: str
     default_run_id: str
-    repetitions: Tuple[int, ...]
+    fixed_repetitions: int
+    learning_rate_arms: Tuple[LearningRateArmSpec, ...]
     conversations_per_repetition: int
     optimizer_steps_per_repetition: int
     expected_total_conversation_presentations: int
@@ -65,6 +105,7 @@ class MemorizationCalibrationSpec:
     main_config_sha256: str
     expected_canary_dataset_sha256: str
     expected_collision_preflight_sha256: str
+    expected_anchor_model_sha256: str
     main_config_path: Path = field(repr=False, compare=False)
     schema_version: str = MEMORIZATION_CALIBRATION_SCHEMA_VERSION
 
@@ -95,6 +136,8 @@ class MemorizationCalibrationPreflightResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MemorizationCalibrationArmResult:
+    arm_id: str
+    learning_rate_millionths: int
     repetitions: int
     conversation_presentations: int
     optimizer_steps: int
@@ -130,6 +173,8 @@ class PositiveCanaryEvaluatorContext:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PositiveCanaryAuditCheckpoint:
     checkpoint_id: str
+    arm_id: str | None
+    learning_rate_millionths: int | None
     repetitions: int
     experiment_seed: int
     expected_model_sha256: str
@@ -151,6 +196,8 @@ class CanaryFieldMetric:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PositiveCanaryAuditResult:
     checkpoint_id: str
+    arm_id: str | None
+    learning_rate_millionths: int | None
     repetitions: int
     generation_count: int
     primary_generation_count: int
@@ -206,7 +253,8 @@ class MemorizationCalibrationResult:
     total_audit_generations: int
     baseline_gate_passed: bool
     calibrated: bool
-    first_successful_repetition: int | None
+    first_successful_arm_id: str | None
+    first_successful_learning_rate_millionths: int | None
     result_sha256: str
     schema_version: str = MEMORIZATION_CALIBRATION_SCHEMA_VERSION
 
@@ -224,7 +272,10 @@ class MemorizationCalibrationResult:
             "total_audit_generations": self.total_audit_generations,
             "baseline_gate_passed": self.baseline_gate_passed,
             "calibrated": self.calibrated,
-            "first_successful_repetition": self.first_successful_repetition,
+            "first_successful_arm_id": self.first_successful_arm_id,
+            "first_successful_learning_rate_millionths": (
+                self.first_successful_learning_rate_millionths
+            ),
             "result_sha256": self.result_sha256,
         }
 
@@ -245,11 +296,12 @@ def validate_memorization_calibration_spec(
         or spec.client_id != CALIBRATION_CLIENT_ID
         or spec.dataset_id != CALIBRATION_DATASET_ID
         or spec.default_run_id != CALIBRATION_RUN_ID
-        or spec.repetitions != CALIBRATION_REPETITIONS
+        or spec.fixed_repetitions != CALIBRATION_FIXED_REPETITIONS
+        or spec.learning_rate_arms != CALIBRATION_LEARNING_RATE_ARMS
         or spec.conversations_per_repetition != 100
         or spec.optimizer_steps_per_repetition != 25
-        or spec.expected_total_conversation_presentations != 30_000
-        or spec.expected_total_optimizer_steps != 7_500
+        or spec.expected_total_conversation_presentations != 64_000
+        or spec.expected_total_optimizer_steps != 16_000
         or spec.audit_generations_per_model != 181
         or spec.expected_total_audit_generations != 905
         or spec.distinctive_exact_pair_threshold != 10
@@ -259,6 +311,7 @@ def validate_memorization_calibration_spec(
         or spec.expected_canary_dataset_sha256 != EXPECTED_CANARY_DATASET_SHA256
         or spec.expected_collision_preflight_sha256
         != EXPECTED_COLLISION_PREFLIGHT_SHA256
+        or spec.expected_anchor_model_sha256 != EXPECTED_ANCHOR_MODEL_SHA256
         or not isinstance(spec.main_config_path, Path)
     ):
         raise MemorizationCalibrationError(
@@ -281,11 +334,13 @@ def load_memorization_calibration_spec_from_config(
         "main_config_sha256",
         "expected_canary_dataset_sha256",
         "expected_collision_preflight_sha256",
+        "expected_anchor_model_sha256",
         "experiment_seed",
         "client_id",
         "dataset_id",
         "default_run_id",
-        "repetitions",
+        "fixed_repetitions",
+        "learning_rate_arms",
         "conversations_per_repetition",
         "optimizer_steps_per_repetition",
         "expected_total_conversation_presentations",
@@ -317,13 +372,33 @@ def load_memorization_calibration_spec_from_config(
         "distinctive_entities",
     }:
         raise MemorizationCalibrationError("critério de calibração é inválido")
+    raw_arms = config.get("learning_rate_arms")
+    if not isinstance(raw_arms, list):
+        raise MemorizationCalibrationError("braços de learning rate são inválidos")
+    try:
+        learning_rate_arms = tuple(
+            LearningRateArmSpec(
+                arm_id=item["arm_id"],
+                learning_rate_millionths=item["learning_rate_millionths"],
+            )
+            for item in raw_arms
+            if isinstance(item, Mapping)
+            and set(item) == {"arm_id", "learning_rate_millionths"}
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise MemorizationCalibrationError(
+            "braços de learning rate são inválidos"
+        ) from error
+    if len(learning_rate_arms) != len(raw_arms):
+        raise MemorizationCalibrationError("braços de learning rate são inválidos")
     try:
         spec = MemorizationCalibrationSpec(
             experiment_seed=config["experiment_seed"],
             client_id=config["client_id"],
             dataset_id=config["dataset_id"],
             default_run_id=config["default_run_id"],
-            repetitions=tuple(config["repetitions"]),
+            fixed_repetitions=config["fixed_repetitions"],
+            learning_rate_arms=learning_rate_arms,
             conversations_per_repetition=config["conversations_per_repetition"],
             optimizer_steps_per_repetition=config["optimizer_steps_per_repetition"],
             expected_total_conversation_presentations=config[
@@ -344,6 +419,7 @@ def load_memorization_calibration_spec_from_config(
             expected_collision_preflight_sha256=config[
                 "expected_collision_preflight_sha256"
             ],
+            expected_anchor_model_sha256=config["expected_anchor_model_sha256"],
             main_config_path=main_path,
             schema_version=config["schema_version"],
         )
@@ -355,7 +431,7 @@ def load_memorization_calibration_spec_from_config(
 def validate_memorization_calibration_arm_result(
     result: object,
     *,
-    allowed_repetitions: Tuple[int, ...] = CALIBRATION_REPETITIONS,
+    allowed_repetitions: Tuple[int, ...] | None = None,
     expected_schema_version: str = MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION,
 ) -> MemorizationCalibrationArmResult:
     if not isinstance(result, MemorizationCalibrationArmResult):
@@ -373,11 +449,33 @@ def validate_memorization_calibration_arm_result(
         result.mean_gradient_norm,
         result.max_gradient_norm,
     )
+    historical = expected_schema_version != MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION
+    allowed = allowed_repetitions or (CALIBRATION_FIXED_REPETITIONS,)
     if (
         result.schema_version != expected_schema_version
+        or (
+            historical
+            and (
+                result.arm_id is not None
+                or result.learning_rate_millionths is not None
+            )
+        )
+        or (
+            not historical
+            and result.arm_id
+            != learning_rate_arm_id(result.learning_rate_millionths)
+        )
+        or (
+            not historical and type(result.learning_rate_millionths) is not int
+        )
         or any(type(value) is not int for value in integer_fields)
         or any(type(value) is not float for value in metric_fields)
-        or result.repetitions not in allowed_repetitions
+        or (
+            not historical
+            and result.learning_rate_millionths
+            not in CALIBRATION_LEARNING_RATE_MILLIONTHS
+        )
+        or result.repetitions not in allowed
         or result.conversation_presentations != result.repetitions * 100
         or result.optimizer_steps != result.repetitions * 25
         or result.supervised_token_presentations <= 0
@@ -397,10 +495,47 @@ def validate_memorization_calibration_arm_result(
     return result
 
 
+def validate_positive_canary_audit_checkpoint(
+    checkpoint: object,
+) -> PositiveCanaryAuditCheckpoint:
+    if not isinstance(checkpoint, PositiveCanaryAuditCheckpoint):
+        raise MemorizationCalibrationError("checkpoint canário é inválido")
+    baseline = checkpoint.repetitions == 0
+    if (
+        checkpoint.schema_version
+        != POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION
+        or type(checkpoint.experiment_seed) is not int
+        or checkpoint.experiment_seed < 0
+        or not isinstance(checkpoint.model_provenance, ModelProvenance)
+        or not _is_sha256(checkpoint.expected_model_sha256)
+        or (
+            baseline
+            and (
+                checkpoint.checkpoint_id != "baseline"
+                or checkpoint.arm_id is not None
+                or checkpoint.learning_rate_millionths is not None
+            )
+        )
+        or (
+            not baseline
+            and (
+                checkpoint.repetitions != CALIBRATION_FIXED_REPETITIONS
+                or checkpoint.learning_rate_millionths
+                not in CALIBRATION_LEARNING_RATE_MILLIONTHS
+                or checkpoint.arm_id
+                != learning_rate_arm_id(checkpoint.learning_rate_millionths)
+                or checkpoint.checkpoint_id != checkpoint.arm_id
+            )
+        )
+    ):
+        raise MemorizationCalibrationError("checkpoint canário viola o contrato")
+    return checkpoint
+
+
 def validate_positive_canary_audit_result(
     result: object,
     *,
-    allowed_repetitions: Tuple[int, ...] = CALIBRATION_REPETITIONS,
+    allowed_repetitions: Tuple[int, ...] | None = None,
     expected_schema_version: str = POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION,
 ) -> PositiveCanaryAuditResult:
     if not isinstance(result, PositiveCanaryAuditResult):
@@ -437,15 +572,45 @@ def validate_positive_canary_audit_result(
         result.untargeted_canary_name_count,
         result.untargeted_exposed_profile_count,
     )
+    historical = expected_schema_version != POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION
+    allowed = allowed_repetitions or (CALIBRATION_FIXED_REPETITIONS,)
     if (
         result.schema_version != expected_schema_version
         or any(type(value) is not int for value in integer_fields)
-        or result.repetitions not in {0, *allowed_repetitions}
-        or result.checkpoint_id
-        != (
-            "baseline"
-            if result.repetitions == 0
-            else f"repetitions-{result.repetitions:03d}"
+        or (
+            historical
+            and (
+                result.arm_id is not None
+                or result.learning_rate_millionths is not None
+                or result.repetitions not in {0, *allowed}
+                or result.checkpoint_id
+                != (
+                    "baseline"
+                    if result.repetitions == 0
+                    else f"repetitions-{result.repetitions:03d}"
+                )
+            )
+        )
+        or (
+            not historical
+            and result.repetitions == 0
+            and (
+                result.checkpoint_id != "baseline"
+                or result.arm_id is not None
+                or result.learning_rate_millionths is not None
+            )
+        )
+        or (
+            not historical
+            and result.repetitions != 0
+            and (
+                result.repetitions != CALIBRATION_FIXED_REPETITIONS
+                or result.learning_rate_millionths
+                not in CALIBRATION_LEARNING_RATE_MILLIONTHS
+                or result.arm_id
+                != learning_rate_arm_id(result.learning_rate_millionths)
+                or result.checkpoint_id != result.arm_id
+            )
         )
         or result.generation_count != 181
         or result.primary_generation_count != 20
@@ -563,11 +728,15 @@ def validate_run_component(value: str, label: str) -> str:
 __all__ = [
     "CALIBRATION_CLIENT_ID",
     "CALIBRATION_DATASET_ID",
+    "CALIBRATION_FIXED_REPETITIONS",
+    "CALIBRATION_LEARNING_RATE_ARMS",
+    "CALIBRATION_LEARNING_RATE_MILLIONTHS",
     "CALIBRATION_REPETITIONS",
     "CALIBRATION_RUN_ID",
     "CALIBRATION_SEED",
     "DISTINCTIVE_FIELD_TYPES",
     "EXPECTED_MAIN_CONFIG_SHA256",
+    "EXPECTED_ANCHOR_MODEL_SHA256",
     "MEMORIZATION_CALIBRATION_ARM_SCHEMA_VERSION",
     "MEMORIZATION_CALIBRATION_SCHEMA_VERSION",
     "POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION",
@@ -576,6 +745,7 @@ __all__ = [
     "POSITIVE_CANARY_AUDIT_RESULT_SCHEMA_VERSION",
     "REPEATABLE_FIELD_TYPES",
     "CanaryFieldMetric",
+    "LearningRateArmSpec",
     "MemorizationCalibrationArmResult",
     "MemorizationCalibrationError",
     "MemorizationCalibrationPreflightResult",
@@ -585,8 +755,11 @@ __all__ = [
     "PositiveCanaryAuditResult",
     "PositiveCanaryEvaluatorContext",
     "load_memorization_calibration_spec_from_config",
+    "learning_rate_arm_id",
+    "learning_rate_value",
     "validate_memorization_calibration_arm_result",
     "validate_memorization_calibration_spec",
+    "validate_positive_canary_audit_checkpoint",
     "validate_positive_canary_audit_result",
     "validate_run_component",
 ]

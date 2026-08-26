@@ -54,7 +54,7 @@ class RunMemorizationCalibrationCliTests(unittest.TestCase):
             status = main(
                 [
                     "--config",
-                    "configs/memorization-calibration-v3.yaml",
+                    "configs/memorization-calibration-v4.yaml",
                     "--device",
                     "cpu",
                     "--preflight-only",
@@ -81,7 +81,7 @@ class RunMemorizationCalibrationCliTests(unittest.TestCase):
             status = main(
                 [
                     "--config",
-                    "configs/memorization-calibration-v3.yaml",
+                    "configs/memorization-calibration-v4.yaml",
                     "--device",
                     "cpu",
                 ]

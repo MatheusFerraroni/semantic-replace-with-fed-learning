@@ -8,14 +8,16 @@ from collections.abc import Sequence
 
 from .calibration_contracts import (
     CALIBRATION_CLIENT_ID,
-    CALIBRATION_REPETITIONS,
+    CALIBRATION_FIXED_REPETITIONS,
+    LearningRateArmSpec,
     MemorizationCalibrationArmResult,
     MemorizationCalibrationError,
+    learning_rate_arm_id,
     validate_memorization_calibration_arm_result,
 )
 from .local_training import (
     _configure_determinism,
-    _create_adamw_optimizer,
+    _create_adamw_optimizer_for_learning_rate,
     _load_torch,
     _run_logical_batch,
 )
@@ -90,13 +92,16 @@ def train_memorization_calibration_arm(
     local_spec: LocalTrainingSpec,
     *,
     seed: int,
-    repetitions: int,
+    arm: LearningRateArmSpec,
     baseline_snapshot: ModelParameterSnapshot,
 ) -> MemorizationCalibrationArmResult:
-    """Treina uma dose com um AdamW contínuo e rollback integral em falha."""
+    """Treina um learning rate com AdamW contínuo e rollback integral."""
 
-    if repetitions not in CALIBRATION_REPETITIONS:
-        raise MemorizationCalibrationError("dose da calibração é inválida")
+    if (
+        not isinstance(arm, LearningRateArmSpec)
+        or arm.arm_id != learning_rate_arm_id(arm.learning_rate_millionths)
+    ):
+        raise MemorizationCalibrationError("braço da calibração é inválido")
     if not isinstance(model_bundle, LoadedModelBundle):
         raise MemorizationCalibrationError("bundle de modelo é incompatível")
     try:
@@ -120,7 +125,12 @@ def train_memorization_calibration_arm(
     torch_seed, seed_hash = _calibration_seed(seed, CALIBRATION_CLIENT_ID)
     try:
         _configure_determinism(torch, torch_seed, parameters[0].device.type)
-        optimizer = _create_adamw_optimizer(torch, parameters, validated_spec)
+        optimizer = _create_adamw_optimizer_for_learning_rate(
+            torch,
+            parameters,
+            validated_spec,
+            learning_rate=arm.learning_rate,
+        )
     except LocalTrainingError as error:
         raise MemorizationCalibrationError(str(error)) from error
 
@@ -129,7 +139,7 @@ def train_memorization_calibration_arm(
     gradients: list[float] = []
     try:
         model.train()
-        for _ in range(repetitions):
+        for _ in range(CALIBRATION_FIXED_REPETITIONS):
             for start in range(0, 100, validated_spec.logical_batch_size):
                 loss, gradient = _run_logical_batch(
                     model,
@@ -141,7 +151,10 @@ def train_memorization_calibration_arm(
                 )
                 losses.append(loss)
                 gradients.append(gradient)
-        if len(losses) != repetitions * validated_spec.optimizer_steps:
+        if (
+            len(losses)
+            != CALIBRATION_FIXED_REPETITIONS * validated_spec.optimizer_steps
+        ):
             raise MemorizationCalibrationError("quantidade de passos do braço diverge")
         _validate_model_parameters(model_bundle, require_finite=True)
         final_hash = fingerprint_model_parameters(model_bundle)
@@ -161,10 +174,12 @@ def train_memorization_calibration_arm(
         raise MemorizationCalibrationError("falha inesperada no braço canário") from error
     model.zero_grad(set_to_none=True)
     result = MemorizationCalibrationArmResult(
-        repetitions=repetitions,
-        conversation_presentations=repetitions * 100,
+        arm_id=arm.arm_id,
+        learning_rate_millionths=arm.learning_rate_millionths,
+        repetitions=CALIBRATION_FIXED_REPETITIONS,
+        conversation_presentations=CALIBRATION_FIXED_REPETITIONS * 100,
         optimizer_steps=len(losses),
-        supervised_token_presentations=repetitions
+        supervised_token_presentations=CALIBRATION_FIXED_REPETITIONS
         * sum(item.supervised_token_count for item in resolved),
         mean_loss=sum(losses) / len(losses),
         first_step_loss=losses[0],

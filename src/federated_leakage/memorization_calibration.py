@@ -17,7 +17,9 @@ from .calibration_checkpointing import (
     save_calibration_checkpoint,
 )
 from .calibration_contracts import (
-    CALIBRATION_REPETITIONS,
+    CALIBRATION_FIXED_REPETITIONS,
+    CALIBRATION_LEARNING_RATE_ARMS,
+    LearningRateArmSpec,
     MemorizationCalibrationArmResult,
     MemorizationCalibrationError,
     MemorizationCalibrationPreflightResult,
@@ -38,7 +40,11 @@ from .canary_audit import (
     prepare_positive_canary_evaluator,
     run_positive_canary_audit,
 )
-from .model_contracts import DEFAULT_MODEL_CACHE, LoadedModelBundle
+from .model_contracts import (
+    DEFAULT_MODEL_CACHE,
+    EXPECTED_PARAMETER_COUNT,
+    LoadedModelBundle,
+)
 from .model_fingerprint import fingerprint_model_parameters
 from .model_loading import load_model_bundle, load_model_spec_from_config
 from .model_updates import (
@@ -234,7 +240,15 @@ def _run_manifest(
         "experiment_seed": spec.experiment_seed,
         "dataset_id": spec.dataset_id,
         "client_id": spec.client_id,
-        "repetitions": list(spec.repetitions),
+        "fixed_repetitions": spec.fixed_repetitions,
+        "learning_rate_arms": [
+            {
+                "arm_id": arm.arm_id,
+                "learning_rate_millionths": arm.learning_rate_millionths,
+            }
+            for arm in spec.learning_rate_arms
+        ],
+        "expected_anchor_model_sha256": spec.expected_anchor_model_sha256,
         "main_config_sha256": spec.main_config_sha256,
         "canary_dataset_sha256": dataset_hash,
         "collision_preflight_sha256": collision_hash,
@@ -286,12 +300,8 @@ def _initialize_run(
     staging.rename(run_root)
 
 
-def _checkpoint_id(repetitions: int) -> str:
-    return "baseline" if repetitions == 0 else f"repetitions-{repetitions:03d}"
-
-
-def _arm_root(run_root: Path, repetitions: int) -> Path:
-    return run_root / "arms" / f"repetitions-{repetitions:03d}"
+def _arm_root(run_root: Path, arm: LearningRateArmSpec) -> Path:
+    return run_root / "arms" / arm.arm_id
 
 
 def _safe_arm_completed_payload(
@@ -300,7 +310,9 @@ def _safe_arm_completed_payload(
     checkpoint_sha256: str,
 ) -> dict[str, Any]:
     return {
-        "schema_version": "memorization-calibration-arm-completed/v3",
+        "schema_version": "memorization-calibration-arm-completed/v4",
+        "arm_id": arm.arm_id,
+        "learning_rate_millionths": arm.learning_rate_millionths,
         "repetitions": arm.repetitions,
         "checkpoint_artifact_sha256": checkpoint_sha256,
         "arm_result": arm.as_safe_dict(),
@@ -337,21 +349,57 @@ def _release_device_cache() -> None:
 
 def _calibration_outcome(
     audits: Sequence[PositiveCanaryAuditResult],
-) -> tuple[bool, bool, int | None]:
-    if not audits or audits[0].repetitions != 0:
+) -> tuple[bool, bool, str | None, int | None]:
+    expected_identity = (
+        (None, None, 0),
+        *(
+            (
+                arm.arm_id,
+                arm.learning_rate_millionths,
+                CALIBRATION_FIXED_REPETITIONS,
+            )
+            for arm in CALIBRATION_LEARNING_RATE_ARMS
+        ),
+    )
+    if tuple(
+        (audit.arm_id, audit.learning_rate_millionths, audit.repetitions)
+        for audit in audits
+    ) != expected_identity:
         raise MemorizationCalibrationError("agenda final da calibração é inválida")
     successful = tuple(
-        audit.repetitions
+        (audit.arm_id, audit.learning_rate_millionths)
         for audit in audits[1:]
         if audit.repetitions > 0 and audit.calibrated_at_checkpoint
     )
-    first_successful = min(successful) if successful else None
+    if any(
+        arm_id is None or learning_rate is None
+        for arm_id, learning_rate in successful
+    ):
+        raise MemorizationCalibrationError("agenda final da calibração é inválida")
+    first_successful = successful[0] if successful else (None, None)
     baseline_gate_passed = audits[0].calibrated_at_checkpoint
     return (
         baseline_gate_passed,
         bool(successful) and not baseline_gate_passed,
-        first_successful,
+        first_successful[0],
+        first_successful[1],
     )
+
+
+def _validate_anchor_regression(
+    spec: MemorizationCalibrationSpec,
+    bundle: LoadedModelBundle,
+    arm: LearningRateArmSpec,
+    result: MemorizationCalibrationArmResult,
+) -> None:
+    if (
+        arm.learning_rate_millionths == 10
+        and bundle.provenance.parameter_count == EXPECTED_PARAMETER_COUNT
+        and result.final_model_sha256 != spec.expected_anchor_model_sha256
+    ):
+        raise MemorizationCalibrationError(
+            "âncora de treinamento da calibração diverge"
+        )
 
 
 def run_memorization_calibration(
@@ -460,6 +508,8 @@ def run_memorization_calibration(
     os.chmod(arms_root, 0o700)
     baseline_checkpoint = PositiveCanaryAuditCheckpoint(
         checkpoint_id="baseline",
+        arm_id=None,
+        learning_rate_millionths=None,
         repetitions=0,
         experiment_seed=resolved.experiment_seed,
         expected_model_sha256=baseline_hash,
@@ -484,18 +534,20 @@ def run_memorization_calibration(
 
     arms: list[MemorizationCalibrationArmResult] = []
     audits: list[PositiveCanaryAuditResult] = [baseline_audit]
-    for repetitions in CALIBRATION_REPETITIONS:
+    for arm in CALIBRATION_LEARNING_RATE_ARMS:
         restore_model_parameter_snapshot(bundle, baseline_snapshot)
         if fingerprint_model_parameters(bundle) != baseline_hash:
             raise MemorizationCalibrationError("restauração do baseline diverge")
-        arm_root = _arm_root(run_root, repetitions)
+        arm_root = _arm_root(run_root, arm)
         checkpoint_root = arm_root / "checkpoint"
         _cleanup_training_staging(arm_root)
         if checkpoint_root.exists():
             arm_result, checkpoint_hash = load_calibration_checkpoint(
                 checkpoint_root,
                 bundle,
-                expected_repetitions=repetitions,
+                expected_arm_id=arm.arm_id,
+                expected_learning_rate_millionths=arm.learning_rate_millionths,
+                expected_repetitions=CALIBRATION_FIXED_REPETITIONS,
                 expected_main_config_sha256=resolved.main_config_sha256,
                 expected_dataset_sha256=preflight.canary_dataset_sha256,
             )
@@ -506,7 +558,7 @@ def run_memorization_calibration(
                 bundle,
                 local_spec,
                 seed=resolved.experiment_seed,
-                repetitions=repetitions,
+                arm=arm,
                 baseline_snapshot=baseline_snapshot,
             )
             checkpoint_hash = save_calibration_checkpoint(
@@ -519,18 +571,25 @@ def run_memorization_calibration(
             resumed = False
         if (
             arm_result.initial_model_sha256 != baseline_hash
+            or arm_result.arm_id != arm.arm_id
+            or arm_result.learning_rate_millionths
+            != arm.learning_rate_millionths
+            or arm_result.repetitions != CALIBRATION_FIXED_REPETITIONS
             or arm_result.model_provenance != bundle.provenance
             or arm_result.sample_order_sha256 != expected_sample_order_sha256
             or arm_result.training_seed_sha256 != expected_training_seed_sha256
             or arm_result.supervised_token_presentations
-            != repetitions * supervised_tokens_per_repetition
+            != CALIBRATION_FIXED_REPETITIONS * supervised_tokens_per_repetition
         ):
             raise MemorizationCalibrationError(
                 "identidade científica do braço diverge"
             )
+        _validate_anchor_regression(resolved, bundle, arm, arm_result)
         checkpoint = PositiveCanaryAuditCheckpoint(
-            checkpoint_id=_checkpoint_id(repetitions),
-            repetitions=repetitions,
+            checkpoint_id=arm.arm_id,
+            arm_id=arm.arm_id,
+            learning_rate_millionths=arm.learning_rate_millionths,
+            repetitions=CALIBRATION_FIXED_REPETITIONS,
             experiment_seed=resolved.experiment_seed,
             expected_model_sha256=arm_result.final_model_sha256,
             model_provenance=bundle.provenance,
@@ -553,7 +612,9 @@ def run_memorization_calibration(
             progress_callback(
                 {
                     "event": "arm_completed",
-                    "repetitions": repetitions,
+                    "arm_id": arm.arm_id,
+                    "learning_rate_millionths": arm.learning_rate_millionths,
+                    "repetitions": CALIBRATION_FIXED_REPETITIONS,
                     "optimizer_steps": arm_result.optimizer_steps,
                     "calibrated_at_checkpoint": audit.calibrated_at_checkpoint,
                     "distinctive_exact_pair_count": audit.distinctive_exact_pair_count,
@@ -565,7 +626,12 @@ def run_memorization_calibration(
         restore_model_parameter_snapshot(bundle, baseline_snapshot)
         _release_device_cache()
 
-    baseline_gate_passed, calibrated, first_successful = _calibration_outcome(audits)
+    (
+        baseline_gate_passed,
+        calibrated,
+        first_successful_arm_id,
+        first_successful_learning_rate,
+    ) = _calibration_outcome(audits)
     safe_without_hash = {
         "schema_version": resolved.schema_version,
         "experiment_seed": resolved.experiment_seed,
@@ -581,7 +647,10 @@ def run_memorization_calibration(
         "total_audit_generations": sum(item.generation_count for item in audits),
         "baseline_gate_passed": baseline_gate_passed,
         "calibrated": calibrated,
-        "first_successful_repetition": first_successful,
+        "first_successful_arm_id": first_successful_arm_id,
+        "first_successful_learning_rate_millionths": (
+            first_successful_learning_rate
+        ),
     }
     result = MemorizationCalibrationResult(
         experiment_seed=resolved.experiment_seed,
@@ -597,14 +666,15 @@ def run_memorization_calibration(
         total_audit_generations=safe_without_hash["total_audit_generations"],
         baseline_gate_passed=baseline_gate_passed,
         calibrated=calibrated,
-        first_successful_repetition=first_successful,
+        first_successful_arm_id=first_successful_arm_id,
+        first_successful_learning_rate_millionths=first_successful_learning_rate,
         result_sha256=_hash(
-            safe_without_hash, b"memorization-calibration-result/v3"
+            safe_without_hash, b"memorization-calibration-result/v4"
         ),
     )
     if (
-        result.total_conversation_presentations != 30_000
-        or result.total_optimizer_steps != 7_500
+        result.total_conversation_presentations != 64_000
+        or result.total_optimizer_steps != 16_000
         or result.total_audit_generations != 905
     ):
         raise MemorizationCalibrationError("totais finais da calibração divergem")
@@ -615,7 +685,10 @@ def run_memorization_calibration(
                 "event": "calibration_completed",
                 "calibrated": result.calibrated,
                 "baseline_gate_passed": result.baseline_gate_passed,
-                "first_successful_repetition": result.first_successful_repetition,
+                "first_successful_arm_id": result.first_successful_arm_id,
+                "first_successful_learning_rate_millionths": (
+                    result.first_successful_learning_rate_millionths
+                ),
                 "result_sha256": result.result_sha256,
             }
         )

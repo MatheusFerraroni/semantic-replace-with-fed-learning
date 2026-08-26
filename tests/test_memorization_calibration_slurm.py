@@ -1,10 +1,11 @@
+import hashlib
 import subprocess
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = ROOT / "scripts" / "run_memorization_calibration_l40s.sbatch"
+LAUNCHER = ROOT / "scripts" / "run_learning_rate_calibration_l40s.sbatch"
 
 
 class MemorizationCalibrationSlurmTests(unittest.TestCase):
@@ -27,9 +28,10 @@ class MemorizationCalibrationSlurmTests(unittest.TestCase):
             "#SBATCH --dependency=singleton",
             "#SBATCH --no-requeue",
             "readonly CALIBRATION_SEED=101",
-            "readonly CALIBRATION_RUN_ID=memorization-calibration-greedy-seed-101-v3",
-            "readonly CALIBRATION_CONFIG=configs/memorization-calibration-v3.yaml",
-            "spec.repetitions == (20, 40, 80, 160)",
+            "readonly CALIBRATION_RUN_ID=memorization-calibration-greedy-lr-seed-101-v4",
+            "readonly CALIBRATION_CONFIG=configs/memorization-calibration-v4.yaml",
+            "spec.fixed_repetitions == 160",
+            "== (10, 30, 100, 300)",
             "export CUBLAS_WORKSPACE_CONFIG=:4096:8",
             "export HF_HUB_OFFLINE=1",
             "export TRANSFORMERS_OFFLINE=1",
@@ -53,6 +55,13 @@ class MemorizationCalibrationSlurmTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(completed.returncode, 2)
+
+    def test_historical_v3_launcher_is_frozen(self):
+        path = ROOT / "scripts" / "run_memorization_calibration_l40s.sbatch"
+        self.assertEqual(
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+            "0d96b81b69b03fe713588e158a1dd18a2fd4078e1d33e2258b75865981763f67",
+        )
 
 
 if __name__ == "__main__":

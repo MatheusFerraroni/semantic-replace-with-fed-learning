@@ -334,10 +334,35 @@ def _create_adamw_optimizer(
 ) -> Any:
     """Cria e confere o AdamW normativo sem manter estado entre clientes."""
 
+    return _create_adamw_optimizer_for_learning_rate(
+        torch,
+        parameters,
+        spec,
+        learning_rate=spec.learning_rate,
+    )
+
+
+def _create_adamw_optimizer_for_learning_rate(
+    torch: Any,
+    parameters: Sequence[Any],
+    spec: LocalTrainingSpec,
+    *,
+    learning_rate: float,
+) -> Any:
+    """Cria AdamW com taxa explícita para experimentos de calibração."""
+
+    if (
+        isinstance(learning_rate, bool)
+        or not isinstance(learning_rate, (int, float))
+        or not math.isfinite(float(learning_rate))
+        or float(learning_rate) <= 0.0
+    ):
+        raise LocalTrainingError("learning rate do otimizador é inválido")
+
     try:
         optimizer = torch.optim.AdamW(
             parameters,
-            lr=spec.learning_rate,
+            lr=float(learning_rate),
             betas=spec.betas,
             eps=spec.optimizer_epsilon,
             weight_decay=spec.weight_decay,

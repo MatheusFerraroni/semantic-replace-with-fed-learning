@@ -83,7 +83,11 @@ def _summary(
         f"{'sim' if result.baseline_gate_passed else 'nao'}"
     )
     print(f"calibrated: {'sim' if result.calibrated else 'nao'}")
-    print(f"primeira_repeticao_bem_sucedida: {result.first_successful_repetition}")
+    print(f"primeiro_braco_bem_sucedido: {result.first_successful_arm_id}")
+    print(
+        "primeiro_learning_rate_bem_sucedido_milionesimos: "
+        f"{result.first_successful_learning_rate_millionths}"
+    )
     print(f"resultado_sha256: {result.result_sha256}")
     print(f"saida: {Path(output_root) / 'runs' / result.run_id}")
 

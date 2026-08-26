@@ -24,9 +24,7 @@ from .audit_prompts import (
 )
 from .calibration_contracts import (
     CALIBRATION_CLIENT_ID,
-    CALIBRATION_REPETITIONS,
     DISTINCTIVE_FIELD_TYPES,
-    POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION,
     POSITIVE_CANARY_AUDIT_CONTEXT_SCHEMA_VERSION,
     POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION,
     REPEATABLE_FIELD_TYPES,
@@ -35,10 +33,11 @@ from .calibration_contracts import (
     PositiveCanaryAuditCheckpoint,
     PositiveCanaryAuditResult,
     PositiveCanaryEvaluatorContext,
+    validate_positive_canary_audit_checkpoint,
     validate_positive_canary_audit_result,
     validate_run_component,
 )
-from .model_contracts import LoadedModelBundle, ModelProvenance
+from .model_contracts import LoadedModelBundle
 from .model_fingerprint import fingerprint_model_parameters
 from .synthetic_profiles.model import (
     PROFILE_FIELD_ORDER,
@@ -293,25 +292,11 @@ def score_positive_canary_audit(
 ) -> PositiveCanaryAuditResult:
     validate_extraction_audit_spec(spec)
     context = _validate_context(context)
-    if (
-        not isinstance(checkpoint, PositiveCanaryAuditCheckpoint)
-        or checkpoint.schema_version
-        != POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION
-        or checkpoint.experiment_seed != context.experiment_seed
-        or checkpoint.repetitions not in {0, *CALIBRATION_REPETITIONS}
-        or checkpoint.checkpoint_id
-        != (
-            "baseline"
-            if checkpoint.repetitions == 0
-            else f"repetitions-{checkpoint.repetitions:03d}"
-        )
-        or not isinstance(checkpoint.model_provenance, ModelProvenance)
-        or len(checkpoint.expected_model_sha256) != 64
-        or any(
-            character not in "0123456789abcdef"
-            for character in checkpoint.expected_model_sha256
-        )
-    ):
+    try:
+        checkpoint = validate_positive_canary_audit_checkpoint(checkpoint)
+    except MemorizationCalibrationError:
+        raise MemorizationCalibrationError("checkpoint de pontuação canário é inválido")
+    if checkpoint.experiment_seed != context.experiment_seed:
         raise MemorizationCalibrationError("checkpoint de pontuação canário é inválido")
     queries = _query_schedule(spec, context)
     resolved = tuple(records)
@@ -435,6 +420,8 @@ def score_positive_canary_audit(
     )
     return validate_positive_canary_audit_result(PositiveCanaryAuditResult(
         checkpoint_id=checkpoint.checkpoint_id,
+        arm_id=checkpoint.arm_id,
+        learning_rate_millionths=checkpoint.learning_rate_millionths,
         repetitions=checkpoint.repetitions,
         generation_count=181,
         primary_generation_count=20,
@@ -569,6 +556,8 @@ def _expected_audit_metadata(
     return {
         "schema_version": POSITIVE_CANARY_AUDIT_JOURNAL_SCHEMA_VERSION,
         "checkpoint_id": checkpoint.checkpoint_id,
+        "arm_id": checkpoint.arm_id,
+        "learning_rate_millionths": checkpoint.learning_rate_millionths,
         "repetitions": checkpoint.repetitions,
         "experiment_seed": checkpoint.experiment_seed,
         "expected_model_sha256": checkpoint.expected_model_sha256,
@@ -693,13 +682,13 @@ def run_positive_canary_audit(
             "proveniência do avaliador canário é inválida"
         ) from error
     context = _validate_context(context)
-    if not isinstance(checkpoint, PositiveCanaryAuditCheckpoint):
+    try:
+        checkpoint = validate_positive_canary_audit_checkpoint(checkpoint)
+    except MemorizationCalibrationError:
         raise MemorizationCalibrationError("checkpoint do avaliador canário é inválido")
     checkpoint_id = validate_run_component(checkpoint.checkpoint_id, "checkpoint_id")
     if (
-        checkpoint.schema_version != POSITIVE_CANARY_AUDIT_CHECKPOINT_SCHEMA_VERSION
-        or checkpoint.experiment_seed != context.experiment_seed
-        or checkpoint.repetitions not in {0, *CALIBRATION_REPETITIONS}
+        checkpoint.experiment_seed != context.experiment_seed
         or checkpoint.model_provenance != model_bundle.provenance
     ):
         raise MemorizationCalibrationError("checkpoint do avaliador canário é inválido")

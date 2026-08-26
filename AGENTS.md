@@ -152,9 +152,10 @@ todos os parâmetros do Tucano 2 0.6B.
   de F1 e 20 rodadas por trajetória. Auditar 20 alvos em B0 e após cada rodada;
   auditar também 1, 5 e 200 alvos em B0 e na rodada 20 de F0/F1. Não congelar a
   receita principal sem revisão humana explícita.
-- Manter artefatos sampling v1 e a calibração greedy v2 imutáveis e somente
-  para inspeção histórica. O runner da calibração v3 não pode retomar, migrar
-  nem combinar configurações, journals, checkpoints ou diretórios anteriores.
+- Manter artefatos sampling v1 e as calibrações greedy v2/v3 imutáveis e
+  somente para inspeção histórica. O runner da investigação de learning rate
+  v4 não pode retomar, migrar nem combinar configurações, journals,
+  checkpoints ou diretórios anteriores.
 - Ao retomar o piloto, validar a continuidade de cada prefixo confirmado e de
   cada checkpoint: rodada 1 parte do baseline compartilhado e toda rodada
   posterior parte do estado final anterior do mesmo cenário.
@@ -162,17 +163,18 @@ todos os parâmetros do Tucano 2 0.6B.
   checkpoint móvel nas demais. Persistir pesos exclusivamente em `safetensors`,
   sem otimizadores, deltas, tokens, textos ou registros protegidos.
 - Reiniciar e reexecutar todos os cenários quando o artefato inicial mudar.
-- Calibrar a capacidade de memorização em execução separada com seed `101`, 20
-  perfis-canário completos e disjuntos e braços independentes de 20, 40, 80 e
-  160 repetições, todos partindo do mesmo baseline pinado. Repetir a dose 20
-  como âncora de regressão da calibração greedy v2.
+- Investigar a capacidade de memorização em execução separada com seed `101`,
+  20 perfis-canário completos e disjuntos e quatro braços independentes, todos
+  com 160 repetições e partindo do mesmo baseline pinado. Variar somente o
+  learning rate AdamW entre `1e-5`, `3e-5`, `1e-4` e `3e-4`.
 - Manter um único AdamW dentro de cada braço canário e reiniciá-lo entre braços.
-  A dose não entra na derivação da seed nem na ordem das 100 conversas, de modo
-  que braços maiores preservem o prefixo de treinamento dos menores.
+  O learning rate não entra na derivação da seed nem na ordem das 100
+  conversas. O braço `1e-5` deve reproduzir exatamente o fingerprint final da
+  dose 160 da calibração greedy v3 no mesmo dispositivo, versões e ambiente.
 - Auditar o baseline e os quatro braços canários com os mesmos 20 alvos e
   prompts greedy. Considerar o controle calibrado somente com pelo menos 10 pares
   distintivos exatos distribuídos por pelo menos cinco canários; executar todas
-  as doses e registrar resultado negativo sem escalada automática.
+  as taxas e registrar resultado negativo sem escalada automática.
 - Manter dados, checkpoints e artefatos privados da calibração separados do
   piloto e da campanha. O piloto greedy exige um braço aprovado, o baseline
   reprovado e uma integração versionada explícita do gate vigente.
@@ -199,9 +201,10 @@ todos os parâmetros do Tucano 2 0.6B.
   `start` ou `resume`. Usar dependência Slurm `singleton`, manter os logs na
   raiz ignorada do projeto e retomar manualmente após `TIMEOUT`; não configurar
   requeue automático.
-- Executar a calibração positiva em uma única L40S pelo launcher
-  `scripts/run_memorization_calibration_l40s.sbatch`, também com modo explícito,
-  ambiente offline, dependência `singleton` e retomada manual.
+- Executar a investigação de learning rate em uma única L40S pelo launcher
+  `scripts/run_learning_rate_calibration_l40s.sbatch`, também com modo
+  explícito, ambiente offline, dependência `singleton` e retomada manual. O
+  launcher anterior da calibração v3 permanece somente para histórico.
 - Não alterar pressupostos experimentais silenciosamente. Registrar mudanças no
   protocolo, README ou configuração da execução.
 - Relatar privacidade e utilidade juntas, inclusive resultados negativos e

@@ -26,7 +26,7 @@ from .model_updates import (
 )
 
 
-CALIBRATION_CHECKPOINT_SCHEMA_VERSION = "memorization-calibration-checkpoint/v2"
+CALIBRATION_CHECKPOINT_SCHEMA_VERSION = "memorization-calibration-checkpoint/v3"
 _FILES = frozenset({"metadata.json", "model.safetensors"})
 
 
@@ -127,6 +127,8 @@ def save_calibration_checkpoint(
         model_raw = (staging / "model.safetensors").read_bytes()
         metadata = {
             "schema_version": CALIBRATION_CHECKPOINT_SCHEMA_VERSION,
+            "arm_id": result.arm_id,
+            "learning_rate_millionths": result.learning_rate_millionths,
             "repetitions": result.repetitions,
             "main_config_sha256": main_config_sha256,
             "dataset_sha256": dataset_sha256,
@@ -172,6 +174,8 @@ def load_calibration_checkpoint(
     source_directory: Path,
     model_bundle: LoadedModelBundle,
     *,
+    expected_arm_id: str,
+    expected_learning_rate_millionths: int,
     expected_repetitions: int,
     expected_main_config_sha256: str,
     expected_dataset_sha256: str,
@@ -188,6 +192,8 @@ def load_calibration_checkpoint(
     metadata = _load_json((source / "metadata.json").read_bytes())
     if set(metadata) != {
         "schema_version",
+        "arm_id",
+        "learning_rate_millionths",
         "repetitions",
         "main_config_sha256",
         "dataset_sha256",
@@ -202,7 +208,12 @@ def load_calibration_checkpoint(
     model_path = source / "model.safetensors"
     model_raw = model_path.read_bytes()
     if (
-        result.repetitions != expected_repetitions
+        result.arm_id != expected_arm_id
+        or result.learning_rate_millionths != expected_learning_rate_millionths
+        or result.repetitions != expected_repetitions
+        or metadata.get("arm_id") != expected_arm_id
+        or metadata.get("learning_rate_millionths")
+        != expected_learning_rate_millionths
         or metadata.get("repetitions") != expected_repetitions
         or metadata.get("main_config_sha256") != expected_main_config_sha256
         or metadata.get("dataset_sha256") != expected_dataset_sha256

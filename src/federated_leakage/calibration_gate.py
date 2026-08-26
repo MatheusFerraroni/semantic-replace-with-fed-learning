@@ -131,11 +131,16 @@ def _provenance(value: object) -> ModelProvenance:
 
 
 def _arm_result(value: object) -> MemorizationCalibrationArmResult:
-    expected = {item.name for item in fields(MemorizationCalibrationArmResult)}
+    expected = {item.name for item in fields(MemorizationCalibrationArmResult)} - {
+        "arm_id",
+        "learning_rate_millionths",
+    }
     if not isinstance(value, Mapping) or set(value) != expected:
         raise PilotExecutionError("braço do gate da calibração é inválido")
     try:
         payload = dict(value)
+        payload["arm_id"] = None
+        payload["learning_rate_millionths"] = None
         payload["model_provenance"] = _provenance(payload["model_provenance"])
         result = MemorizationCalibrationArmResult(**payload)
         return validate_memorization_calibration_arm_result(
@@ -150,11 +155,16 @@ def _arm_result(value: object) -> MemorizationCalibrationArmResult:
 
 
 def _audit_result(value: object) -> PositiveCanaryAuditResult:
-    expected = {item.name for item in fields(PositiveCanaryAuditResult)}
+    expected = {item.name for item in fields(PositiveCanaryAuditResult)} - {
+        "arm_id",
+        "learning_rate_millionths",
+    }
     if not isinstance(value, Mapping) or set(value) != expected:
         raise PilotExecutionError("auditoria do gate da calibração é inválida")
     try:
         payload = dict(value)
+        payload["arm_id"] = None
+        payload["learning_rate_millionths"] = None
         payload["model_provenance"] = _provenance(payload["model_provenance"])
         metric_keys = {item.name for item in fields(CanaryFieldMetric)}
         metrics = payload.get("field_metrics")

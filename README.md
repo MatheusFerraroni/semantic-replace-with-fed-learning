@@ -16,7 +16,7 @@ A campanha principal e as defesas continuam pendentes.
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
 - [Configuração oficial greedy da campanha](configs/main-v2.yaml)
-- [Configuração da calibração greedy ampliada](configs/memorization-calibration-v3.yaml)
+- [Configuração da investigação greedy de learning rate](configs/memorization-calibration-v4.yaml)
 - [Configuração sampling v1 (histórica, somente leitura)](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
@@ -409,13 +409,15 @@ Git. Não há requeue automático: após `TIMEOUT`, consulte `sacct` e os logs e
 submeta novamente o modo `resume`, que reutiliza o último checkpoint confirmado
 ou reproduz a rodada incompleta.
 
-## Calibrar memorização com canários completos
+## Investigar learning rate com canários completos
 
-A calibração ampliada v3 é independente do piloto. Ela reutiliza os mesmos 20
-perfis-canário disjuntos e treina quatro braços partindo do mesmo baseline com
-20, 40, 80 e 160 repetições do bundle de 100 conversas. São 30.000
-apresentações, 7.500 passos AdamW e 905 gerações greedy no total. A dose 20 é
-repetida como âncora de regressão da v2.
+A calibração v4 é independente do piloto. Ela reutiliza os mesmos 20
+perfis-canário disjuntos e treina quatro braços partindo do mesmo baseline.
+Todos percorrem 160 vezes o bundle de 100 conversas; somente o learning rate
+AdamW varia entre `1e-5`, `3e-5`, `1e-4` e `3e-4`. São 64.000 apresentações,
+16.000 passos e 905 gerações greedy no total. O braço `1e-5` deve reproduzir o
+fingerprint final da dose 160 da v3 antes que os demais resultados sejam
+aceitos.
 
 Valide primeiro, sem escrever:
 
@@ -423,7 +425,7 @@ Valide primeiro, sem escrever:
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_memorization_calibration \
-  --config configs/memorization-calibration-v3.yaml \
+  --config configs/memorization-calibration-v4.yaml \
   --device cuda \
   --preflight-only
 ```
@@ -431,16 +433,16 @@ python -m federated_leakage.run_memorization_calibration \
 No Slurm, use sempre um modo explícito:
 
 ```bash
-sbatch scripts/run_memorization_calibration_l40s.sbatch preflight
-sbatch scripts/run_memorization_calibration_l40s.sbatch start
-sbatch scripts/run_memorization_calibration_l40s.sbatch resume
+sbatch scripts/run_learning_rate_calibration_l40s.sbatch preflight
+sbatch scripts/run_learning_rate_calibration_l40s.sbatch start
+sbatch scripts/run_learning_rate_calibration_l40s.sbatch resume
 ```
 
-`start` cria `memorization-calibration-greedy-seed-101-v3`; `resume` revalida
-braços, checkpoints e auditorias já publicados. A calibração só libera o piloto
-depois de uma integração versionada adicional, quando algum braço atinge o
-limiar e o baseline não. Caso contrário, `calibrated=false` mantém bloqueados o
-piloto e o desenvolvimento das defesas até uma nova decisão de protocolo. Consulte
+`start` cria `memorization-calibration-greedy-lr-seed-101-v4`; `resume` revalida
+braços, checkpoints e auditorias já publicados. A investigação só libera uma
+decisão posterior de integração do piloto quando algum braço atinge o limiar e
+o baseline não. Caso contrário, `calibrated=false` mantém bloqueados o piloto e
+o desenvolvimento das defesas até uma nova decisão de protocolo. Consulte
 [`docs/memorization-calibration.md`](docs/memorization-calibration.md).
 
 ## Gerar um dataset para inspeção
