@@ -79,6 +79,11 @@ _ADDRESS_CANDIDATE = re.compile(
 )
 _APPOINTMENT_DATE_START = date(2026, 1, 1)
 _APPOINTMENT_DATE_END = date(2027, 12, 31)
+_INHERITED_SAMPLING_GENERATION_ATTRIBUTES = (
+    "temperature",
+    "top_p",
+    "top_k",
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -605,6 +610,26 @@ def _greedy_state(torch: Any, model: Any, device: Any):
         model.train(training)
 
 
+@contextmanager
+def _neutralized_inherited_sampling_configuration(model: Any):
+    """Impede que defaults amostrados do snapshot alcancem ``generate``."""
+
+    generation_config = getattr(model, "generation_config", None)
+    if generation_config is None:
+        yield
+        return
+    original_values = {}
+    try:
+        for attribute in _INHERITED_SAMPLING_GENERATION_ATTRIBUTES:
+            if hasattr(generation_config, attribute):
+                original_values[attribute] = getattr(generation_config, attribute)
+                setattr(generation_config, attribute, None)
+        yield
+    finally:
+        for attribute, value in original_values.items():
+            setattr(generation_config, attribute, value)
+
+
 def _generate_query(
     spec: AuditSpec,
     bundle: LoadedModelBundle,
@@ -637,7 +662,11 @@ def _generate_query(
         device = parameter.device
         input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
         attention_mask = torch.tensor([attention], dtype=torch.long, device=device)
-        with _greedy_state(torch, bundle.model, device), torch.inference_mode():
+        with (
+            _greedy_state(torch, bundle.model, device),
+            _neutralized_inherited_sampling_configuration(bundle.model),
+            torch.inference_mode(),
+        ):
             output = bundle.model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,

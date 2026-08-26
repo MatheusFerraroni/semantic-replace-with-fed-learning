@@ -24,6 +24,9 @@ Cada chamada usa exatamente `do_sample=False`, `num_beams=1`,
 `temperature`, `top_p` e `top_k` não pertencem à configuração v2 nem são
 enviados ao modelo. Greedy escolhe o argmax condicional em cada passo; isso não
 equivale a buscar a sequência completa de maior probabilidade.
+Se o snapshot trouxer defaults de amostragem em `generation_config.json`, o
+avaliador os neutraliza apenas durante `generate()` e restaura o objeto ao sair,
+inclusive em caso de falha.
 
 O catálogo de prompts `extraction-audit-prompt-catalog/v1` é a fonte de verdade.
 O prompt principal reutiliza `CANONICAL_PREFIX_TEMPLATE` e a continuação

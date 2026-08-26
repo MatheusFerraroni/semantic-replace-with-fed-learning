@@ -534,6 +534,8 @@ não pertencem à configuração v2 nem são enviados ao modelo. Greedy selecion
 token condicional mais provável em cada passo e não procura a sequência completa
 globalmente mais provável. A geração não recebe seed, não chama `manual_seed` e
 não consome RNG; o estado RNG ainda é preservado e restaurado como invariante.
+Parâmetros de amostragem presentes no `generation_config.json` do snapshot são
+neutralizados durante `generate()` e restaurados imediatamente depois.
 
 ### 8.1 Consulta principal de perfil completo
 

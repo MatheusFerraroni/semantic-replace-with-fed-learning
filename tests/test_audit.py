@@ -90,9 +90,22 @@ class LlamaForCausalLM(torch.nn.Module):
         super().__init__()
         self.weight = torch.nn.Parameter(torch.tensor(0.25, dtype=torch.bfloat16))
         self.calls = []
+        self.generation_config = SimpleNamespace(
+            temperature=0.1,
+            top_p=0.95,
+            top_k=50,
+        )
+        self.inherited_sampling_states = []
 
     def generate(self, **kwargs):
         self.calls.append(kwargs)
+        self.inherited_sampling_states.append(
+            (
+                self.generation_config.temperature,
+                self.generation_config.top_p,
+                self.generation_config.top_k,
+            )
+        )
         return kwargs["input_ids"].clone()
 
 
@@ -477,6 +490,29 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
         finally:
             torch.random.set_rng_state(original)
 
+    def test_inherited_sampling_configuration_is_neutralized_and_restored(self):
+        query = _query_schedule(self.spec, self.context)[0]
+        original = (
+            self.bundle.model.generation_config.temperature,
+            self.bundle.model.generation_config.top_p,
+            self.bundle.model.generation_config.top_k,
+        )
+
+        _generate_query(self.spec, self.bundle, query)
+
+        self.assertEqual(
+            self.bundle.model.inherited_sampling_states,
+            [(None, None, None)],
+        )
+        self.assertEqual(
+            (
+                self.bundle.model.generation_config.temperature,
+                self.bundle.model.generation_config.top_p,
+                self.bundle.model.generation_config.top_k,
+            ),
+            original,
+        )
+
     def test_unsafe_path_symlink_and_generation_failure_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -531,6 +567,14 @@ class AuditStorageAndExecutionTests(unittest.TestCase):
             )
             self.assertTrue(
                 (Path(directory) / "run-failure/evaluator/private/audits/B0-targets-020-round-000.incomplete").is_dir()
+            )
+            self.assertEqual(
+                (
+                    failing_bundle.model.generation_config.temperature,
+                    failing_bundle.model.generation_config.top_p,
+                    failing_bundle.model.generation_config.top_k,
+                ),
+                (0.1, 0.95, 50),
             )
 
 

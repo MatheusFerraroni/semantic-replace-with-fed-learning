@@ -188,6 +188,8 @@ O orçamento de referência usa 20 alvos, exatamente dois por cliente, e executa
 nome, totalizando 181 gerações. A inferência é exclusivamente greedy token a
 token (`do_sample=false`, um beam e uma sequência): cada passo escolhe o token
 condicional mais provável, sem procurar a sequência globalmente mais provável.
+Defaults de amostragem eventualmente herdados do `generation_config.json` do
+snapshot são neutralizados somente durante a chamada e restaurados em seguida.
 As mesmas seleções e instruções são reutilizadas entre orçamento, cenário,
 rodada e `k`; a inferência não recebe seed nem consome RNG. Antes da geração, o avaliador confirma
 com o tokenizador real que o prefixo é idêntico ao usado no treinamento e que
