@@ -51,7 +51,7 @@ from federated_leakage import (
     run_extraction_audit,
 )
 
-audit_spec = load_extraction_audit_spec_from_config(Path("configs/main-v2.yaml"))
+audit_spec = load_extraction_audit_spec_from_config(Path("configs/main-v3.yaml"))
 evaluator = prepare_trusted_evaluator(
     victim_datasets,
     experiment_seed=101,
@@ -72,7 +72,7 @@ result = run_extraction_audit(
     checkpoint,
     model_bundle,
     output_root=Path("outputs/runs"),
-    run_id="pilot-greedy-seed-101-B0-v2",
+    run_id="pilot-greedy-lr-000030-seed-101-k01-v3",
 )
 ```
 
@@ -132,6 +132,8 @@ v1 existem apenas para inspeção histórica e nunca habilitam geração ou reto
 
 O piloto B0/F0/F1 invoca automaticamente a auditoria depois de cada uma das
 20 rodadas. Continuam fora deste contrato diagnósticos de perfis auxiliares,
-rank/NLL, controles negativos, utilidade, F2/F3 e métricas das substituições
-F4/F5. O controle positivo canário possui executor paralelo próprio, descrito em
-`memorization-calibration.md`, sem alterar os contratos B0/F0/F1 desta página.
+rank/NLL, controles negativos, F2/F3 e métricas das substituições F4/F5. A
+utilidade held-out do piloto v3 usa um avaliador causal agregado separado, sem
+geração de texto, descrito em `pilot-orchestrator.md`. O controle positivo
+canário possui executor paralelo próprio, descrito em
+`memorization-calibration.md`, sem alterar os contratos de extração desta página.

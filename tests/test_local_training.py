@@ -171,6 +171,12 @@ class TrainingConfigurationTests(unittest.TestCase):
             spec,
             load_local_training_spec_from_config(Path("configs/main-v2.yaml")),
         )
+        promoted = load_local_training_spec_from_config(Path("configs/main-v3.yaml"))
+        self.assertEqual(promoted.learning_rate, 3e-5)
+        self.assertEqual(
+            dataclasses.replace(promoted, learning_rate=1e-5),
+            spec,
+        )
 
     def test_rejects_recipe_drift_and_duplicate_yaml_without_values(self):
         import yaml
@@ -179,6 +185,11 @@ class TrainingConfigurationTests(unittest.TestCase):
         config["training"]["logical_batch_size"] = 8
         with self.assertRaisesRegex(LocalTrainingError, "logical_batch_size"):
             parse_local_training_spec(config)
+
+        promoted = yaml.safe_load(Path("configs/main-v3.yaml").read_text())
+        promoted["attack"]["learning_rate"] = 1e-5
+        with self.assertRaisesRegex(LocalTrainingError, "attack.learning_rate"):
+            parse_local_training_spec(promoted)
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "duplicate.yaml"

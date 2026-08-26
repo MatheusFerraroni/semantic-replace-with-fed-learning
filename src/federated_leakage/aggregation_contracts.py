@@ -131,6 +131,7 @@ def parse_fedavg_spec(config: Mapping[str, Any]) -> FedAvgSpec:
     if config.get("schema_version") not in {
         "federated-leakage/main-config/v1",
         "federated-leakage/main-config/v2",
+        "federated-leakage/main-config/v3",
     }:
         raise FedAvgError("schema da configuração principal é incompatível")
 

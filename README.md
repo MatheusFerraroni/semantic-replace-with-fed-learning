@@ -10,12 +10,14 @@ O repositório contém a especificação, o contrato do modelo, a configuração
 campanha, o carregador validado do Tucano 2 e a implementação executável dos
 perfis e conversas sintéticas, da tokenização, do treinamento local não privado,
 do FedAvg, da auditoria central de extração, do orquestrador retomável do piloto
-B0/F0/F1 de 20 rodadas e da calibração positiva vulnerável com canários completos.
-A campanha principal e as defesas continuam pendentes.
+B0/F0/F1 de 20 rodadas, da calibração positiva vulnerável com canários completos
+e da avaliação sintética de utilidade. A investigação v4 promoveu `3e-5` para o
+novo piloto v3; a campanha principal e as defesas continuam pendentes.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
-- [Configuração oficial greedy da campanha](configs/main-v2.yaml)
+- [Configuração do piloto promovido com `3e-5`](configs/main-v3.yaml)
+- [Configuração greedy anterior (histórica)](configs/main-v2.yaml)
 - [Configuração da investigação greedy de learning rate](configs/memorization-calibration-v4.yaml)
 - [Configuração sampling v1 (histórica, somente leitura)](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
@@ -35,6 +37,7 @@ A campanha principal e as defesas continuam pendentes.
 | Controle positivo vulnerável com canários completos | Implementado |
 | DP-SGD e substituições semânticas | Não implementado |
 | Auditoria central de extração B0/F0/F1 | Implementado |
+| Utilidade sintética held-out em B0/F0-r20/F1-r20 | Implementado |
 | Diagnósticos auxiliares, rank/NLL e controles negativos | Não implementado |
 
 ## Modelo de ameaça
@@ -220,7 +223,7 @@ tokenizador antes de terminar:
 
 ```bash
 python -m federated_leakage.prepare_model \
-  --config configs/main-v2.yaml
+  --config configs/main-v3.yaml
 ```
 
 O cache padrão é `artifacts/huggingface/`, permanece fora do Git e pode ser
@@ -229,7 +232,7 @@ mesmo preflight pode ser repetido sem permitir rede:
 
 ```bash
 python -m federated_leakage.prepare_model \
-  --config configs/main-v2.yaml \
+  --config configs/main-v3.yaml \
   --offline
 ```
 
@@ -320,19 +323,25 @@ ao orquestrador do piloto.
 
 ## Executar ou retomar o piloto B0/F0/F1
 
-O piloto v2 continua ligado ao gate histórico da calibração v2, que terminou
-com `calibrated=false`, e portanto permanece bloqueado. A calibração ampliada v3
-deve ser concluída e revisada primeiro; mesmo que passe, a integração do novo
-gate ao piloto será uma alteração versionada posterior. Não submeta o launcher
-do piloto nesta etapa.
+O piloto greedy v3 promove AdamW `3e-5` igualmente para os dez clientes-vítima e
+para o auxiliar. Ele usa seed `101`, `k=1`, audita B0 uma vez, percorre F0 por 20
+rodadas, recarrega o baseline pinado e percorre F1 por 20 rodadas. O checkpoint
+canário nunca é usado como baseline. O gate lê estritamente a calibração v4
+concluída, cujo primeiro braço aprovado foi `lr-000030`, com 100/100 pares
+distintivos e 20/20 canários; o baseline da calibração não passou.
 
-O piloto greedy v2 usa seed `101`, `k=1`, audita B0 uma vez, percorre F0 por 20
-rodadas, recarrega o baseline e percorre F1 por 20 rodadas. O orçamento de 20
-alvos é auditado em todos os 41 checkpoints; 1, 5 e 200 alvos são adicionados em
-B0 e na rodada 20 de cada trajetória. O total é de 44.000 conversas, 11.000
-passos locais e 12.992 gerações. F0 e F1 compartilham o baseline somente na
-rodada 1; depois, cada trajetória continua de seu próprio modelo final anterior,
-mantendo pareados os dados, pesos, seeds e demais controles experimentais.
+O orçamento de 20 alvos é auditado em todos os 41 checkpoints; 1, 5 e 200 alvos
+são adicionados em B0 e na rodada 20 de cada trajetória. O total permanece em
+44.000 conversas, 11.000 passos locais e 12.992 gerações. F0 e F1 compartilham o
+baseline somente na rodada 1; depois, cada trajetória continua de seu próprio
+modelo final anterior, mantendo pareados os dados, pesos, seeds e demais
+controles experimentais.
+
+Um fluxo held-out independente gera em memória 100 perfis e 500 conversas de
+utilidade. As mesmas amostras tokenizadas são avaliadas em B0, F0-r20 e F1-r20,
+totalizando 1.500 conversas avaliadas. O resumo relata perda causal média por
+conversa, NLL ponderada por token, perplexidade e deltas contra B0. Esses valores
+são descritivos e não formam um gate automático.
 
 Todo processo Python que use CUDA determinístico deve receber, antes de iniciar,
 o valor exato abaixo. O programa valida o contrato e falha se a variável estiver
@@ -349,7 +358,7 @@ sem escrever saídas:
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_pilot \
-  --config configs/main-v2.yaml \
+  --config configs/main-v3.yaml \
   --device cuda \
   --preflight-only
 ```
@@ -360,15 +369,14 @@ Para executar ou retomar:
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_pilot \
-  --config configs/main-v2.yaml \
+  --config configs/main-v3.yaml \
   --device cuda
 ```
 
 O destino padrão é `outputs/`, com `run_id`
-`pilot-greedy-seed-101-k01-v2`. O piloto só começa depois de validar o marcador
-concluído e aprovado da calibração greedy v2; o baseline não pode atingir o
-próprio gate. Também são
-aceitos `--cache-dir`, `--model-artifact-dir`, `--output-root` e `--run-id`.
+`pilot-greedy-lr-000030-seed-101-k01-v3`. O piloto só começa depois de validar o
+marcador v4 exato e sua ligação ao mesmo baseline carregado. Também são aceitos
+`--cache-dir`, `--model-artifact-dir`, `--output-root` e `--run-id`.
 `--fresh` recusa uma execução já existente; sem ele, artefatos compatíveis são
 revalidados e a execução continua do último checkpoint confirmado. Não existe
 fallback de modelo, revisão, dtype ou dispositivo. Consulte
@@ -381,28 +389,32 @@ explícito. Execute somente um dos comandos conforme a etapa atual. Primeiro,
 submeta apenas o preflight:
 
 ```bash
-sbatch scripts/run_pilot_l40s.sbatch preflight
+sbatch scripts/run_pilot_lr_000030_l40s.sbatch preflight
 ```
 
 Depois da revisão explícita do preflight, inicie uma execução nova:
 
 ```bash
-sbatch scripts/run_pilot_l40s.sbatch start
+sbatch scripts/run_pilot_lr_000030_l40s.sbatch start
 ```
 
 Use `resume` somente quando o diretório da execução oficial já existir:
 
 ```bash
-sbatch scripts/run_pilot_l40s.sbatch resume
+sbatch scripts/run_pilot_lr_000030_l40s.sbatch resume
 ```
 
 `preflight` não escreve artefatos científicos. `start` usa `--fresh` e recusa
-um diretório `outputs/runs/pilot-greedy-seed-101-k01-v2` existente. `resume` exige esse
-diretório, revalida seus artefatos e continua o mesmo `run_id`. O launcher
+um diretório `outputs/runs/pilot-greedy-lr-000030-seed-101-k01-v3` existente.
+`resume` exige esse diretório, revalida seus artefatos e continua o mesmo
+`run_id`. O launcher
 reserva uma L40S, 8 CPUs, 64 GiB e 24 horas, usa `.venv/bin/python`, mantém o
 modelo offline e exporta o contrato do cuBLAS antes do Python. A dependência
 Slurm `singleton` impede jobs simultâneos com o mesmo nome; ainda assim, nunca
 submeta dois jobs para o mesmo `run_id`.
+
+O launcher histórico `scripts/run_pilot_l40s.sbatch` e os diretórios v1/v2
+permanecem imutáveis e não podem iniciar nem retomar o piloto promovido.
 
 Os logs `slurm-%x-%j.out` e `slurm-%x-%j.err` ficam na raiz e permanecem fora do
 Git. Não há requeue automático: após `TIMEOUT`, consulte `sacct` e os logs e
@@ -439,10 +451,9 @@ sbatch scripts/run_learning_rate_calibration_l40s.sbatch resume
 ```
 
 `start` cria `memorization-calibration-greedy-lr-seed-101-v4`; `resume` revalida
-braços, checkpoints e auditorias já publicados. A investigação só libera uma
-decisão posterior de integração do piloto quando algum braço atinge o limiar e
-o baseline não. Caso contrário, `calibrated=false` mantém bloqueados o piloto e
-o desenvolvimento das defesas até uma nova decisão de protocolo. Consulte
+braços, checkpoints e auditorias já publicados. A execução oficial terminou com
+`calibrated=true`, baseline reprovado e `lr-000030` como primeiro braço aprovado;
+esse resultado foi integrado estritamente ao piloto v3. Consulte
 [`docs/memorization-calibration.md`](docs/memorization-calibration.md).
 
 ## Gerar um dataset para inspeção

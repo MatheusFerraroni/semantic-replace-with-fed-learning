@@ -26,6 +26,10 @@ def _preflight():
         tokenization_validated=True,
         calibration_result_sha256="5" * 64,
         calibration_manifest_sha256="6" * 64,
+        utility_profile_count=100,
+        utility_conversation_count=500,
+        utility_dataset_sha256="7" * 64,
+        utility_tokenization_validated=True,
     )
 
 
@@ -61,7 +65,7 @@ class RunPilotCliTests(unittest.TestCase):
             status = main(
                 [
                     "--config",
-                    "configs/main-v2.yaml",
+                    "configs/main-v3.yaml",
                     "--device",
                     "cpu",
                     "--preflight-only",
@@ -75,6 +79,7 @@ class RunPilotCliTests(unittest.TestCase):
             )
         self.assertEqual(status, 0)
         self.assertIn("status: preflight validado", output.getvalue())
+        self.assertIn("conversas_utilidade: 500", output.getvalue())
         self.assertNotIn("PERSON_NAME", output.getvalue())
         kwargs = runner.call_args.kwargs
         self.assertTrue(kwargs["preflight_only"])
@@ -96,7 +101,7 @@ class RunPilotCliTests(unittest.TestCase):
             status = main(
                 [
                     "--config",
-                    "configs/main-v2.yaml",
+                    "configs/main-v3.yaml",
                     "--device",
                     "cpu",
                 ]

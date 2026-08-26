@@ -163,11 +163,18 @@ def parse_local_training_spec(config: Mapping[str, Any]) -> LocalTrainingSpec:
 
     if not isinstance(config, Mapping):
         raise LocalTrainingError("configuração de treinamento deve ser mapeada")
-    if config.get("schema_version") not in {
+    main_schema_version = config.get("schema_version")
+    if main_schema_version not in {
         "federated-leakage/main-config/v1",
         "federated-leakage/main-config/v2",
+        "federated-leakage/main-config/v3",
     }:
         raise LocalTrainingError("schema da configuração principal é incompatível")
+    expected_learning_rate = (
+        3e-5
+        if main_schema_version == "federated-leakage/main-config/v3"
+        else 1e-5
+    )
 
     reproducibility = _mapping(config, "reproducibility")
     federated = _mapping(config, "federated")
@@ -234,7 +241,12 @@ def parse_local_training_spec(config: Mapping[str, Any]) -> LocalTrainingSpec:
         EXPECTED_CONVERSATION_COUNT,
         "attack.local_data_generation",
     )
-    _finite_float(attack, "learning_rate", 1e-5, "attack")
+    _finite_float(
+        attack,
+        "learning_rate",
+        expected_learning_rate,
+        "attack",
+    )
     submitted_scale = _finite_float(
         attack,
         "reference_submitted_delta_scale",
@@ -255,7 +267,12 @@ def parse_local_training_spec(config: Mapping[str, Any]) -> LocalTrainingSpec:
     if not isinstance(betas, (list, tuple)) or tuple(betas) != (0.9, 0.95):
         raise LocalTrainingError("training.betas diverge da receita fixada")
 
-    learning_rate = _finite_float(training, "learning_rate", 1e-5, "training")
+    learning_rate = _finite_float(
+        training,
+        "learning_rate",
+        expected_learning_rate,
+        "training",
+    )
     optimizer_epsilon = _finite_float(
         training, "optimizer_epsilon", 1e-8, "training"
     )
@@ -327,7 +344,6 @@ def validate_local_training_spec(spec: object) -> LocalTrainingSpec:
         "label_ignore_index": -100,
         "loss_reduction": "mean_per_conversation_then_mean_batch",
         "optimizer": "adamw",
-        "learning_rate": 1e-5,
         "betas": (0.9, 0.95),
         "optimizer_epsilon": 1e-8,
         "optimizer_state": "reset_each_client_round",
@@ -350,7 +366,9 @@ def validate_local_training_spec(spec: object) -> LocalTrainingSpec:
         "update_dtype": "float32",
         "update_persistence": "forbidden",
     }
-    if any(getattr(spec, key, None) != value for key, value in expected.items()):
+    if spec.learning_rate not in {1e-5, 3e-5} or any(
+        getattr(spec, key, None) != value for key, value in expected.items()
+    ):
         raise LocalTrainingError("especificação local diverge da receita fixada")
     return spec
 

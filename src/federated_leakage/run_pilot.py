@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from .execution_contracts import (
+    PILOT_DEFAULT_RUN_ID,
     PilotExecutionError,
     PilotExecutionResult,
     PilotPreflightResult,
@@ -72,7 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--run-id",
         help=(
             "Identificador seguro opcional; o padrão é "
-            "pilot-greedy-seed-101-k01-v2."
+            f"{PILOT_DEFAULT_RUN_ID}."
         ),
     )
     parser.add_argument(
@@ -115,6 +116,9 @@ def _print_summary(
         print(f"conversas_vitima: {result.victim_conversation_count}")
         print(f"rodadas_auxiliares: {result.auxiliary_round_count}")
         print(f"conversas_auxiliares: {result.auxiliary_conversation_count}")
+        print(f"perfis_utilidade: {result.utility_profile_count}")
+        print(f"conversas_utilidade: {result.utility_conversation_count}")
+        print(f"utilidade_sha256: {result.utility_dataset_sha256}")
         print(f"modelo_sha256: {result.model_state_sha256}")
         print(f"agenda_pareada_sha256: {result.paired_schedule_sha256}")
         print(f"escrita: {'nao' if preflight_only else 'sim'}")
@@ -127,6 +131,12 @@ def _print_summary(
     print(f"conversas_processadas: {result.total_conversation_count}")
     print(f"passos_otimizador: {result.total_optimizer_steps}")
     print(f"geracoes_auditoria: {result.total_audit_generations}")
+    print("conversas_utilidade_avaliadas: 1500")
+    for comparison in result.utility_comparisons:
+        print(
+            f"utilidade_{comparison.scenario}_delta_perplexidade: "
+            f"{comparison.perplexity_delta}"
+        )
     print(f"pareamento_sha256: {result.paired_results_sha256}")
     print(f"saida: {Path(output_root) / 'runs' / result.identity.run_id}")
 

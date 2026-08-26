@@ -37,9 +37,10 @@ A campanha principal responde:
 
 Resultado negativo ou inconclusivo é válido. Este protocolo é a fonte normativa
 para os dados, o ataque, a auditoria e as defesas. Os valores oficiais de
-execução ficam em `configs/main-v2.yaml`; `main-v1.yaml` é preservado byte a byte
-somente como histórico sampling e não pode iniciar nem retomar execuções ativas.
-A configuração resolvida deve falhar se divergir deste documento.
+execução do piloto promovido ficam em `configs/main-v3.yaml`; `main-v1.yaml` e
+`main-v2.yaml` são preservados byte a byte como históricos e não podem iniciar
+nem retomar essa execução. A configuração resolvida deve falhar se divergir
+deste documento.
 
 Este documento especifica também etapas futuras da campanha. O estado executável
 de cada componente é mantido no README; uma seção normativa aqui não implica que
@@ -226,7 +227,7 @@ records_per_round: 100
 complete_profile_records_per_round: 80
 general_records_per_round: 20
 optimizer: adamw
-learning_rate: 0.00001
+learning_rate: 0.00003
 logical_batch_size: 4
 local_steps: 25
 submitted_delta_scale: 1.0
@@ -437,7 +438,7 @@ CPU/`float32` e só é aplicada ao modelo depois da validação dos 11 clientes.
 
 Qualquer falha invalida a soma parcial e restaura o modelo global bit a bit. O
 resultado `federated-round/v1` contém somente métricas agregadas, normas, hashes
-e proveniência segura. O piloto B0/F0/F1 conecta esse núcleo a uma orquestração
+e proveniência segura. O piloto B0/F0/F1 v3 conecta esse núcleo a uma orquestração
 retomável de 20 rodadas por trajetória, checkpoints `safetensors` e auditoria
 automática após cada rodada. A validação do piloto exige o baseline comum na
 rodada 1 e continuidade interna `initial[r] == final[r-1]` separadamente em F0 e
@@ -652,10 +653,11 @@ O baseline e os quatro braços são auditados com os mesmos 20 alvos e prompts,
 exatos dos campos distintivos CPF, RG, telefone, e-mail e endereço se distribuem
 por pelo menos cinco canários. Todos os braços são executados mesmo após o
 primeiro sucesso. Ela só libera o piloto quando ao menos um braço passa e o
-baseline não; `baseline_gate_passed=true` força `calibrated=false`. Um resultado
-negativo é conclusão operacional válida, mas bloqueia o piloto e a promoção para
-as defesas e exige nova decisão de protocolo. No total são 905 gerações, 64.000
-apresentações de conversa e 16.000 passos. O braço `1e-5` precisa reproduzir o
+baseline não; `baseline_gate_passed=true` força `calibrated=false`. A execução
+oficial reprovou o baseline e aprovou `3e-5`, `1e-4` e `3e-4`; `3e-5` foi o
+primeiro braço aprovado, com 100/100 pares distintivos e 20/20 canários, e foi
+promovido por ser a menor taxa aprovada. No total foram 905 gerações, 64.000
+apresentações de conversa e 16.000 passos. O braço `1e-5` reproduziu o
 fingerprint da dose 160 da v3 no mesmo ambiente antes da interpretação dos
 demais resultados.
 
@@ -670,27 +672,27 @@ com seed `101` e `k=1`. O orçamento de referência de 20 participantes-alvo rod
 em B0 e após cada uma das 20 rodadas de F0/F1; 1, 5 e 200 alvos são adicionados
 somente em B0 e na rodada 20 de cada trajetória. Os conjuntos são aninhados e a
 seleção de 20 permanece balanceada em dois alvos por cliente. Isso totaliza
-12.992 gerações: 2.038 em B0 e 5.477 por trajetória. O piloto v2 ainda exige o
-marcador da calibração greedy v2, que terminou com gate negativo, e permanece
-bloqueado. Uma calibração v4 positiva exige integração versionada posterior;
-ela não libera silenciosamente o runner atual. Depois do piloto,
-a receita só pode ser congelada após revisão
-humana; a execução não altera a configuração automaticamente. A seed de
-desenvolvimento não entra nos resultados.
+12.992 gerações: 2.038 em B0 e 5.477 por trajetória. O piloto v3 valida
+estritamente o resultado v4 fixado, aplica `3e-5` a todos os 11 clientes e
+continua partindo do Tucano 2 pinado, não do checkpoint canário. Depois do
+piloto, a receita só pode ser congelada após revisão humana; a execução não
+altera a configuração automaticamente. A seed de desenvolvimento não entra nos
+resultados.
 
 No cluster Slurm de referência, o piloto usa um único processo em uma L40S pelo
-launcher `scripts/run_pilot_l40s.sbatch`, submetido da raiz do repositório com
+launcher `scripts/run_pilot_lr_000030_l40s.sbatch`, submetido da raiz do repositório com
 modo obrigatório `preflight`, `start` ou `resume`. O launcher fixa recursos,
 configuração, cache, saída e `run_id`, exporta o ambiente CUDA determinístico e
 offline antes do Python e serializa submissões pela dependência `singleton`.
 `start` usa `--fresh` e recusa o diretório desse `run_id` se ele já existir;
-`resume` exige a execução existente e mantém o mesmo `run_id` sem `--fresh`.
+`resume` exige a execução existente e mantém o mesmo `run_id` sem `--fresh`. O
+launcher v2 anterior permanece histórico.
 
 Os resultados sampling v1, inclusive
 `memorization-calibration-seed-101-v1` e `pilot-seed-101-k01`, permanecem
-imutáveis para inspeção histórica. A calibração greedy v2 concluída também é
-somente leitura; os artefatos v3 também são históricos e imutáveis. O runner
-ativo v4 recusa configurações, journals, checkpoints e diretórios v1/v2/v3.
+imutáveis para inspeção histórica. As calibrações greedy v2/v3 são somente
+leitura, e a investigação v4 é preservada como gate imutável do piloto v3. Runs
+e checkpoints de piloto v1/v2 não podem ser retomados pelo runner v3.
 
 Os logs `slurm-%x-%j.out` e `slurm-%x-%j.err` ficam na raiz ignorada pelo Git.
 Não há requeue automático. Depois de `TIMEOUT`, o operador verifica `sacct` e os
@@ -700,9 +702,11 @@ execuções simultâneas para o mesmo `run_id` são proibidas no piloto.
 
 ## 9. Utilidade e estatística
 
-Utilidade usa 100 perfis sintéticos exclusivos de avaliação e mede perplexidade,
-perda, tempo de execução e memória. Nenhum perfil de avaliação aparece no
-treinamento.
+Utilidade usa 100 perfis sintéticos exclusivos de avaliação, com 500 conversas
+tokenizadas uma vez, e mede perda média por conversa, NLL ponderada por token,
+perplexidade, tempo de execução e memória em B0, F0-r20 e F1-r20. Nenhum perfil
+de avaliação aparece no treinamento. Somente métricas agregadas e hashes são
+persistidos; os deltas contra B0 são descritivos e não possuem limiar automático.
 
 A semente de treinamento é a única unidade estatística independente. Comparações
 usam diferenças pareadas por semente. Gerações e rodadas são medidas repetidas,

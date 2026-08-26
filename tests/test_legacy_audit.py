@@ -96,6 +96,12 @@ class LegacyAuditReaderTests(unittest.TestCase):
             "5f9a9b43275765bcbc6f472e893e3aa334bb7258a738d47561921f99beea0719",
         )
 
+    def test_promoted_main_v3_is_frozen(self):
+        self.assertEqual(
+            hashlib.sha256(Path("configs/main-v3.yaml").read_bytes()).hexdigest(),
+            "b5bde98b847e18927121c7f57d049d704f339d251b6f75c30b98fc692569fc2e",
+        )
+
     def test_reads_sampling_v1_only_for_strict_historical_inspection(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "summary.json"

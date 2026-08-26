@@ -53,9 +53,12 @@ from .execution_storage import (
     read_persisted_audit_result,
     read_pilot_completed,
     read_trajectory_state,
+    read_utility_result,
     remove_obsolete_resume_checkpoints,
     round_result_from_safe_payload,
     safe_payload_sha256,
+    utility_result_path,
+    write_utility_result,
     write_pilot_completed,
 )
 from .federated_round import (
@@ -80,6 +83,8 @@ from .reproducibility import (
 from .synthetic_profiles import (
     AuxiliaryRound,
     AuxiliaryRoundGenerator,
+    HeldoutUtilityDatasetGenerator,
+    PositiveCanaryDatasetGenerator,
     VictimClientDataset,
     VictimDatasetGenerator,
     build_round_manifest,
@@ -87,11 +92,21 @@ from .synthetic_profiles import (
     read_auxiliary_round,
     read_victim_client_dataset,
     validate_conversation_preflight,
+    validate_no_cross_flow_collisions,
     validate_paired_auxiliary_rounds,
     write_auxiliary_round,
     write_victim_datasets,
 )
 from .training_contracts import LocalTrainingSpec, load_local_training_spec_from_config
+from .utility_evaluation import (
+    PreparedUtilityEvaluation,
+    UtilityEvaluationResult,
+    compare_utility_to_baseline,
+    evaluate_utility,
+    prepare_utility_evaluation,
+    utility_dataset_sha256,
+    validate_utility_evaluation_result,
+)
 from .trusted_evaluator import (
     preflight_extraction_audit,
     prepare_trusted_evaluator,
@@ -136,11 +151,22 @@ def _materialize_data_preflight(
         generator.generate(round_id, presentation="adversarial")
         for round_id in range(1, resolved.rounds + 1)
     )
+    canary = PositiveCanaryDatasetGenerator(resolved.experiment_seed).generate()
+    utility = HeldoutUtilityDatasetGenerator(resolved.experiment_seed).generate()
     try:
         for benign, adversarial in zip(benign_rounds, adversarial_rounds):
             validate_paired_auxiliary_rounds(benign, adversarial)
         validate_conversation_preflight(victim_datasets, benign_rounds)
         validate_conversation_preflight(victim_datasets, adversarial_rounds)
+        validate_no_cross_flow_collisions(
+            (
+                *(dataset.conversations for dataset in victim_datasets),
+                *(round_data.conversations for round_data in benign_rounds),
+                *(round_data.conversations for round_data in adversarial_rounds),
+                canary.conversations,
+                utility.conversations,
+            )
+        )
         victim_manifest = build_victim_dataset_manifest(victim_datasets)
         benign_manifests = tuple(build_round_manifest(item) for item in benign_rounds)
         adversarial_manifests = tuple(
@@ -185,6 +211,9 @@ def _materialize_data_preflight(
         benign_schedule_sha256=benign_schedule_sha256,
         adversarial_schedule_sha256=adversarial_schedule_sha256,
         paired_schedule_sha256=paired_schedule_sha256,
+        utility_profile_count=100,
+        utility_conversation_count=len(utility.conversations),
+        utility_dataset_sha256=utility_dataset_sha256(utility),
     )
 
 
@@ -376,11 +405,16 @@ def _load_committed_trajectory(
     audit_spec: AuditSpec,
     contexts: Mapping[int, TrustedEvaluatorContext],
     baseline_model_sha256: str,
-) -> tuple[list[FedAvgRoundResult], list[ExtractionAuditResult]]:
+) -> tuple[
+    list[FedAvgRoundResult],
+    list[ExtractionAuditResult],
+    UtilityEvaluationResult | None,
+]:
     rounds: list[FedAvgRoundResult] = []
     audits: list[ExtractionAuditResult] = []
+    utility_result = None
     for round_id in range(1, completed_round + 1):
-        result, round_audits, _, _ = read_committed_round(
+        result, round_audits, _, _, round_utility = read_committed_round(
             paths,
             scenario,
             round_id,
@@ -401,7 +435,12 @@ def _load_committed_trajectory(
             _revalidate_completed_audit(paths, audit_spec, contexts, audit)
             for audit in round_audits
         )
-    return rounds, audits
+        if round_utility is not None:
+            persisted_utility = read_utility_result(paths, scenario)
+            if persisted_utility != round_utility:
+                raise PilotExecutionError("utilidade retomada diverge do commit da rodada")
+            utility_result = round_utility
+    return rounds, audits, utility_result
 
 
 def _validate_trajectory_round_continuity(
@@ -449,17 +488,29 @@ def _trajectory_result(
     baseline_audit_sha256: str,
     rounds: Sequence[FedAvgRoundResult],
     audits: Sequence[ExtractionAuditResult],
+    utility_result: UtilityEvaluationResult,
 ) -> FederatedTrajectoryResult:
     round_tuple = tuple(rounds)
     audit_tuple = tuple(audits)
     if len(round_tuple) != 20 or not round_tuple:
         raise PilotExecutionError("trajetória não possui vinte rodadas")
     _validate_trajectory_sequence(scenario, baseline_model_sha256, round_tuple)
+    try:
+        utility = validate_utility_evaluation_result(utility_result)
+    except Exception as error:
+        raise PilotExecutionError("utilidade final da trajetória é inválida") from error
+    if (
+        utility.scenario != scenario
+        or utility.round_id != 20
+        or utility.model_state_sha256 != round_tuple[-1].final_model_sha256
+    ):
+        raise PilotExecutionError("utilidade final diverge da trajetória")
     payload = {
         "scenario": scenario,
         "baseline_audit_sha256": baseline_audit_sha256,
         "rounds": [safe_payload_sha256(item.as_safe_dict()) for item in round_tuple],
         "audits": [safe_payload_sha256(item.as_safe_dict()) for item in audit_tuple],
+        "utility": safe_payload_sha256(utility.as_safe_dict()),
     }
     return FederatedTrajectoryResult(
         scenario=scenario,
@@ -473,7 +524,8 @@ def _trajectory_result(
         final_model_sha256=round_tuple[-1].final_model_sha256,
         round_results=round_tuple,
         audit_results=audit_tuple,
-        result_sha256=_canonical_hash(payload, b"federated-trajectory-result/v2"),
+        utility_result=utility,
+        result_sha256=_canonical_hash(payload, b"federated-trajectory-result/v3"),
     )
 
 
@@ -497,6 +549,8 @@ def validate_paired_federated_trajectory_results(
         or benign.baseline_audit_sha256 != adversarial.baseline_audit_sha256
         or len(benign.round_results) != 20
         or len(adversarial.round_results) != 20
+        or benign.utility_result.dataset_sha256
+        != adversarial.utility_result.dataset_sha256
     ):
         raise PilotExecutionError("trajetórias pareadas são incompatíveis")
     expected_benign_initial = benign.baseline_model_sha256
@@ -531,6 +585,7 @@ def validate_paired_federated_trajectory_results(
             trajectory.baseline_audit_sha256,
             trajectory.round_results,
             trajectory.audit_results,
+            trajectory.utility_result,
         )
         if expected != trajectory:
             raise PilotExecutionError("hash ou totais da trajetória divergem")
@@ -559,12 +614,52 @@ def validate_paired_federated_trajectory_results(
     return benign, adversarial
 
 
+def _run_or_reuse_utility(
+    *,
+    spec: PilotExecutionSpec,
+    prepared: PreparedUtilityEvaluation,
+    scenario: str,
+    round_id: int,
+    model_bundle: LoadedModelBundle,
+    model_state_sha256: str,
+    paths: PilotRunPaths,
+) -> UtilityEvaluationResult:
+    path = utility_result_path(paths, scenario)
+    if path.exists():
+        result = read_utility_result(paths, scenario)
+        if (
+            result.dataset_sha256 != prepared.dataset_sha256
+            or result.model_state_sha256 != model_state_sha256
+            or result.model_provenance != model_bundle.provenance
+            or result.round_id != round_id
+        ):
+            raise PilotExecutionError("utilidade concluída diverge do checkpoint")
+        return result
+    try:
+        result = evaluate_utility(
+            spec.utility_evaluation,
+            prepared,
+            model_bundle,
+            scenario=scenario,
+            round_id=round_id,
+            experiment_seed=spec.experiment_seed,
+        )
+        write_utility_result(paths, result)
+        return result
+    except PilotExecutionError:
+        raise
+    except Exception as error:
+        raise PilotExecutionError("avaliação de utilidade falhou") from error
+
+
 def _validate_and_commit_pair(
     paths: PilotRunPaths,
     benign: FedAvgRoundResult,
     benign_audits: Sequence[ExtractionAuditResult],
     adversarial: FedAvgRoundResult,
     adversarial_audits: Sequence[ExtractionAuditResult],
+    benign_utility: UtilityEvaluationResult | None = None,
+    adversarial_utility: UtilityEvaluationResult | None = None,
     *,
     expected_benign_initial_model_sha256: str,
     expected_adversarial_initial_model_sha256: str,
@@ -593,8 +688,28 @@ def _validate_and_commit_pair(
         )
         for first, second in pairs:
             validate_paired_extraction_audit_results(first, second)
+        utility_pair = None
+        if benign.round_id == 20:
+            if benign_utility is None or adversarial_utility is None:
+                raise PilotExecutionError("utilidade pareada da rodada final está ausente")
+            if (
+                benign_utility.dataset_sha256
+                != adversarial_utility.dataset_sha256
+                or benign_utility.scenario != "F0"
+                or adversarial_utility.scenario != "F1"
+            ):
+                raise PilotExecutionError("utilidade pareada diverge")
+            utility_pair = (benign_utility, adversarial_utility)
+        elif benign_utility is not None or adversarial_utility is not None:
+            raise PilotExecutionError("utilidade pareada fora da rodada final")
         if commit:
-            commit_paired_round(paths, benign, adversarial, pairs)
+            commit_paired_round(
+                paths,
+                benign,
+                adversarial,
+                pairs,
+                utility_pair=utility_pair,
+            )
     except PilotExecutionError:
         raise
     except (FedAvgError, ExtractionAuditError) as error:
@@ -620,7 +735,7 @@ def _restore_committed_checkpoint(
         if fingerprint_model_parameters(model_bundle) != baseline_model_sha256:
             raise PilotExecutionError("modelo inicial da trajetória diverge do baseline")
         return
-    _, _, checkpoint_id, expected_artifact_sha = read_committed_round(
+    _, _, checkpoint_id, expected_artifact_sha, _ = read_committed_round(
         paths,
         scenario,
         state_round,
@@ -649,6 +764,7 @@ def run_non_private_trajectory(
     evaluator_contexts: Mapping[int, TrustedEvaluatorContext],
     local_training_spec: LocalTrainingSpec,
     fedavg_spec: FedAvgSpec,
+    prepared_utility: PreparedUtilityEvaluation,
     *,
     scenario: TrajectoryScenario,
     baseline_model_sha256: str,
@@ -676,7 +792,7 @@ def run_non_private_trajectory(
         baseline_model_sha256=baseline_model_sha256,
         baseline_audit_sha256=baseline_audit_sha256,
     )
-    round_results, audit_results = _load_committed_trajectory(
+    round_results, audit_results, trajectory_utility = _load_committed_trajectory(
         paths,
         scenario,
         state.completed_round,
@@ -758,8 +874,27 @@ def run_non_private_trajectory(
                     for audit in recovered_audits
                 ):
                     raise PilotExecutionError("auditoria recuperada diverge do checkpoint")
+                recovered_utility = (
+                    _run_or_reuse_utility(
+                        spec=resolved,
+                        prepared=prepared_utility,
+                        scenario=scenario,
+                        round_id=round_id,
+                        model_bundle=model_bundle,
+                        model_state_sha256=recovered_round.final_model_sha256,
+                        paths=paths,
+                    )
+                    if round_id == 20
+                    else None
+                )
+                if (
+                    round_id == 20
+                    and recovered.metadata.utility_result_sha256
+                    != safe_payload_sha256(recovered_utility.as_safe_dict())
+                ):
+                    raise PilotExecutionError("utilidade recuperada diverge do checkpoint")
                 if scenario == "F1":
-                    benign, benign_audits, _, _ = read_committed_round(
+                    benign, benign_audits, _, _, benign_utility = read_committed_round(
                         paths, "F0", round_id
                     )
                     expected_benign_initial_model_sha256 = (
@@ -775,6 +910,8 @@ def run_non_private_trajectory(
                         benign_audits,
                         recovered_round,
                         recovered_audits,
+                        benign_utility,
+                        recovered_utility,
                         expected_benign_initial_model_sha256=(
                             expected_benign_initial_model_sha256
                         ),
@@ -791,10 +928,13 @@ def run_non_private_trajectory(
                     checkpoint_id=checkpoint_id,
                     checkpoint_artifact_sha256=recovered.artifact_sha256,
                     baseline_model_sha256=baseline_model_sha256,
+                    utility_result=recovered_utility,
                 )
                 recovered_committed = True
                 round_results.append(recovered_round)
                 audit_results.extend(recovered_audits)
+                if recovered_utility is not None:
+                    trajectory_utility = recovered_utility
                 remove_obsolete_resume_checkpoints(
                     paths,
                     scenario,
@@ -859,8 +999,21 @@ def run_non_private_trajectory(
                 model_state_sha256=result.final_model_sha256,
                 paths=paths,
             )
+            utility_result = (
+                _run_or_reuse_utility(
+                    spec=resolved,
+                    prepared=prepared_utility,
+                    scenario=scenario,
+                    round_id=round_id,
+                    model_bundle=model_bundle,
+                    model_state_sha256=result.final_model_sha256,
+                    paths=paths,
+                )
+                if round_id == 20
+                else None
+            )
             if scenario == "F1":
-                benign, benign_audits, _, _ = read_committed_round(
+                benign, benign_audits, _, _, benign_utility = read_committed_round(
                     paths, "F0", round_id
                 )
                 expected_benign_initial_model_sha256 = (
@@ -876,6 +1029,8 @@ def run_non_private_trajectory(
                     benign_audits,
                     result,
                     audits,
+                    benign_utility,
+                    utility_result,
                     expected_benign_initial_model_sha256=(
                         expected_benign_initial_model_sha256
                     ),
@@ -893,6 +1048,7 @@ def run_non_private_trajectory(
                 canonical_template_sha256=victim_manifest[
                     "canonical_template_sha256"
                 ],
+                utility_result=utility_result,
             )
             checkpoint = save_federated_checkpoint(
                 checkpoint_path,
@@ -908,6 +1064,7 @@ def run_non_private_trajectory(
                 checkpoint_id=checkpoint_id,
                 checkpoint_artifact_sha256=checkpoint.artifact_sha256,
                 baseline_model_sha256=baseline_model_sha256,
+                utility_result=utility_result,
             )
             round_committed = True
             if scenario == "F1":
@@ -917,6 +1074,8 @@ def run_non_private_trajectory(
                     benign_audits,
                     result,
                     audits,
+                    benign_utility,
+                    utility_result,
                     expected_benign_initial_model_sha256=(
                         expected_benign_initial_model_sha256
                     ),
@@ -958,17 +1117,22 @@ def run_non_private_trajectory(
             raise PilotExecutionError("execução da rodada federada falhou") from error
         round_results.append(result)
         audit_results.extend(audits)
+        if utility_result is not None:
+            trajectory_utility = utility_result
     remove_obsolete_resume_checkpoints(
         paths,
         scenario,
         keep_round=resolved.rounds,
     )
+    if trajectory_utility is None:
+        raise PilotExecutionError("trajetória terminou sem avaliação de utilidade")
     return _trajectory_result(
         scenario,
         baseline_model_sha256,
         baseline_audit_sha256,
         round_results,
         audit_results,
+        trajectory_utility,
     )
 
 
@@ -1018,7 +1182,7 @@ def run_paired_pilot(
         identity.config_sha256 != resolved.config_sha256
     ) or identity.calibration_result_sha256 != calibration_gate.result_sha256 or (
         identity.calibration_manifest_sha256 != calibration_gate.manifest_sha256
-    ):
+    ) or identity.learning_rate_millionths != 30:
         raise PilotExecutionError("identidade da execução diverge da configuração")
     try:
         victims = VictimDatasetGenerator(resolved.experiment_seed).generate()
@@ -1026,6 +1190,15 @@ def run_paired_pilot(
         audit_spec = load_extraction_audit_spec_from_config(config_path)
         local_spec = load_local_training_spec_from_config(config_path)
         fedavg_spec = load_fedavg_spec_from_config(config_path)
+        if local_spec.learning_rate != 3e-5:
+            raise PilotExecutionError("learning rate do piloto v3 diverge")
+        utility_dataset = HeldoutUtilityDatasetGenerator(
+            resolved.experiment_seed
+        ).generate()
+        if utility_dataset_sha256(utility_dataset) != (
+            data_preflight.utility_dataset_sha256
+        ):
+            raise PilotExecutionError("dataset de utilidade diverge do preflight")
     except PilotExecutionError:
         raise
     except Exception as error:
@@ -1054,6 +1227,10 @@ def run_paired_pilot(
         ):
             raise PilotExecutionError("modelo diverge do gate da calibração")
         victim_inputs = prepare_victim_training_inputs(victims, first_bundle)
+        prepared_utility = prepare_utility_evaluation(
+            utility_dataset,
+            first_bundle,
+        )
         contexts = {
             count: prepare_trusted_evaluator(
                 victims,
@@ -1074,6 +1251,7 @@ def run_paired_pilot(
                 "tokenization_validated": True,
                 "calibration_result_sha256": calibration_gate.result_sha256,
                 "calibration_manifest_sha256": calibration_gate.manifest_sha256,
+                "utility_tokenization_validated": True,
             }
         )
 
@@ -1098,10 +1276,20 @@ def run_paired_pilot(
         model_state_sha256=baseline_model_sha256,
         paths=paths,
     )
+    baseline_utility = _run_or_reuse_utility(
+        spec=resolved,
+        prepared=prepared_utility,
+        scenario="B0",
+        round_id=0,
+        model_bundle=first_bundle,
+        model_state_sha256=baseline_model_sha256,
+        paths=paths,
+    )
     baseline_audit_sha256 = mark_baseline_completed(
         paths,
         baseline_model_sha256,
         baseline_audits,
+        baseline_utility,
     )
     if progress_callback is not None:
         progress_callback(
@@ -1123,6 +1311,7 @@ def run_paired_pilot(
         contexts,
         local_spec,
         fedavg_spec,
+        prepared_utility,
         scenario="F0",
         baseline_model_sha256=baseline_model_sha256,
         baseline_audit_sha256=baseline_audit_sha256,
@@ -1147,6 +1336,7 @@ def run_paired_pilot(
         contexts,
         local_spec,
         fedavg_spec,
+        prepared_utility,
         scenario="F1",
         baseline_model_sha256=baseline_model_sha256,
         baseline_audit_sha256=baseline_audit_sha256,
@@ -1156,8 +1346,8 @@ def run_paired_pilot(
     expected_benign_initial_model_sha256 = baseline_model_sha256
     expected_adversarial_initial_model_sha256 = baseline_model_sha256
     for round_id in range(1, resolved.rounds + 1):
-        benign, benign_audits, _, _ = read_committed_round(paths, "F0", round_id)
-        adversarial, adversarial_audits, _, _ = read_committed_round(
+        benign, benign_audits, _, _, benign_utility = read_committed_round(paths, "F0", round_id)
+        adversarial, adversarial_audits, _, _, adversarial_utility = read_committed_round(
             paths, "F1", round_id
         )
         _validate_and_commit_pair(
@@ -1166,6 +1356,8 @@ def run_paired_pilot(
             benign_audits,
             adversarial,
             adversarial_audits,
+            benign_utility,
+            adversarial_utility,
             expected_benign_initial_model_sha256=(
                 expected_benign_initial_model_sha256
             ),
@@ -1181,15 +1373,24 @@ def run_paired_pilot(
             "f1": f1.result_sha256,
             "baseline": baseline_model_sha256,
             "baseline_audit": baseline_audit_sha256,
+            "baseline_utility": baseline_utility.scientific_sha256,
+            "f0_utility": f0.utility_result.scientific_sha256,
+            "f1_utility": f1.utility_result.scientific_sha256,
         },
-        b"paired-pilot-result/v2",
+        b"paired-pilot-result/v3",
+    )
+    utility_comparisons = (
+        compare_utility_to_baseline(baseline_utility, f0.utility_result),
+        compare_utility_to_baseline(baseline_utility, f1.utility_result),
     )
     result = PilotExecutionResult(
         identity=identity,
         baseline_model_sha256=baseline_model_sha256,
         baseline_audit_sha256=baseline_audit_sha256,
         baseline_audits=baseline_audits,
+        baseline_utility=baseline_utility,
         trajectories=(f0, f1),
+        utility_comparisons=utility_comparisons,
         total_federated_rounds=f0.completed_rounds + f1.completed_rounds,
         total_conversation_count=f0.conversation_count + f1.conversation_count,
         total_optimizer_steps=f0.optimizer_steps + f1.optimizer_steps,
@@ -1206,6 +1407,10 @@ def run_paired_pilot(
         or result.total_conversation_count != 44_000
         or result.total_optimizer_steps != 11_000
         or result.total_audit_generations != PILOT_EXPECTED_GENERATION_COUNT
+        or baseline_utility.conversation_count
+        + f0.utility_result.conversation_count
+        + f1.utility_result.conversation_count
+        != 1_500
     ):
         raise PilotExecutionError("totais finais do piloto divergem do protocolo")
     completed = read_pilot_completed(paths)

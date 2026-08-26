@@ -20,12 +20,14 @@ from .model import (
     CONVERSATION_SCHEMA_VERSION,
     EMAIL_DOMAINS,
     EMAIL_LOCAL_PART_MAX_LENGTH,
+    HELDOUT_UTILITY_DATASET_SCHEMA_VERSION,
     PROFILE_FIELD_ORDER,
     PROFILE_SCHEMA_VERSION,
     POSITIVE_CANARY_DATASET_SCHEMA_VERSION,
     UNIQUE_FIELD_TYPES,
     VICTIM_DATASET_SCHEMA_VERSION,
     AuxiliaryRound,
+    HeldoutUtilityDataset,
     RenderedProfile,
     SyntheticProfile,
     TrainingConversation,
@@ -342,6 +344,55 @@ def validate_positive_canary_dataset(dataset: PositiveCanaryClientDataset) -> No
         general_ids.append(general[0].template_id)
     if set(general_ids) != set(GENERAL_CONVERSATION_TEMPLATE_IDS):
         raise ConversationValidationError("catálogo geral canário está incompleto")
+    _assert_general_has_no_protected_values(dataset.conversations)
+    validate_no_cross_flow_collisions((dataset.conversations,))
+
+
+def validate_heldout_utility_dataset(dataset: HeldoutUtilityDataset) -> None:
+    """Valida o conjunto held-out sem permitir identidade de vítima ou canário."""
+
+    if dataset.schema_version != HELDOUT_UTILITY_DATASET_SCHEMA_VERSION:
+        raise ConversationValidationError("schema_version do dataset de utilidade inválida")
+    if dataset.client_id != "utility-eval-01":
+        raise ConversationValidationError("client_id do dataset de utilidade inválido")
+    if len(dataset.conversations) != 500:
+        raise ConversationValidationError("dataset de utilidade não contém 500 conversas")
+    if {item.sample_index for item in dataset.conversations} != set(range(500)):
+        raise ConversationValidationError("índices do dataset de utilidade inválidos")
+
+    by_entity: Dict[str, list[TrainingConversation]] = defaultdict(list)
+    for conversation in dataset.conversations:
+        validate_training_conversation(conversation)
+        if conversation.client_id != dataset.client_id:
+            raise ConversationValidationError("conversa de utilidade pertence a outro cliente")
+        if conversation.round_id is not None:
+            raise ConversationValidationError("dataset de utilidade não pode depender de rodada")
+        if conversation.loss_scope != "all_tokens":
+            raise ConversationValidationError("dataset de utilidade não usa perda integral")
+        by_entity[conversation.entity_id].append(conversation)
+    if len(by_entity) != 100:
+        raise ConversationValidationError("dataset de utilidade não contém 100 entidades")
+
+    general_ids = []
+    for conversations in by_entity.values():
+        protected = [item for item in conversations if item.kind == "protected"]
+        general = [item for item in conversations if item.kind == "general"]
+        if len(protected) != 4 or len(general) != 1:
+            raise ConversationValidationError(
+                "entidade de utilidade não possui quatro protegidas e uma geral"
+            )
+        if {item.template_id for item in protected} != set(
+            PROTECTED_NATURAL_TEMPLATE_IDS
+        ):
+            raise ConversationValidationError("molduras de utilidade estão incompletas")
+        reference = _conversation_values(protected[0])
+        if any(_conversation_values(item) != reference for item in protected[1:]):
+            raise ConversationValidationError("valores de utilidade variam na entidade")
+        general_ids.append(general[0].template_id)
+    if Counter(general_ids) != Counter(
+        {template_id: 5 for template_id in GENERAL_CONVERSATION_TEMPLATE_IDS}
+    ):
+        raise ConversationValidationError("catálogo geral de utilidade está incompleto")
     _assert_general_has_no_protected_values(dataset.conversations)
     validate_no_cross_flow_collisions((dataset.conversations,))
 

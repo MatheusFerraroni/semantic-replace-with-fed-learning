@@ -11,6 +11,7 @@ CONVERSATION_SCHEMA_VERSION = "training-conversation/v1"
 CONVERSATION_GENERATOR_VERSION = "training-conversation-generator/v1"
 VICTIM_DATASET_SCHEMA_VERSION = "victim-client-dataset/v1"
 POSITIVE_CANARY_DATASET_SCHEMA_VERSION = "positive-canary-client-dataset/v1"
+HELDOUT_UTILITY_DATASET_SCHEMA_VERSION = "heldout-utility-dataset/v1"
 AUXILIARY_ROUND_SCHEMA_VERSION = "auxiliary-round/v2"
 
 BIRTH_DATE_START = date(1966, 1, 1)
@@ -134,6 +135,15 @@ class PositiveCanaryClientDataset:
     client_id: str
     conversations: Tuple[TrainingConversation, ...] = field(repr=False)
     schema_version: str = POSITIVE_CANARY_DATASET_SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HeldoutUtilityDataset:
+    """As 500 conversas sintéticas mantidas somente em memória pelo avaliador."""
+
+    client_id: str
+    conversations: Tuple[TrainingConversation, ...] = field(repr=False)
+    schema_version: str = HELDOUT_UTILITY_DATASET_SCHEMA_VERSION
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

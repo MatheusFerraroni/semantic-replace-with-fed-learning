@@ -69,10 +69,10 @@ ou `null`.
 
 A promoção exige simultaneamente um braço aprovado e
 `baseline_gate_passed=false`; se o próprio baseline passar,
-`calibrated=false`. Um resultado negativo encerra normalmente, mas mantém
-bloqueados o piloto greedy e o desenvolvimento das defesas. Mesmo um resultado
-positivo exige uma integração versionada posterior; a v4 não altera
-silenciosamente o gate do piloto existente.
+`calibrated=false`. A execução oficial v4 terminou com o baseline reprovado e
+três braços aprovados. `lr-000030` foi o primeiro: atingiu 100/100 pares
+distintivos e 20/20 canários. Por ser a menor taxa aprovada, `3e-5` foi promovida
+explicitamente para o piloto v3; o checkpoint canário não é reutilizado.
 
 ## Persistência e retomada
 
@@ -129,5 +129,6 @@ Os artefatos de
 `memorization-calibration-seed-101-v1`,
 `memorization-calibration-greedy-seed-101-v2` e
 `memorization-calibration-greedy-seed-101-v3` permanecem históricos, imutáveis
-e incompatíveis com retomada v4. DP-SGD, substituição semântica, rank/NLL e
+e incompatíveis com retomada v4. O próprio run v4 também é preservado como gate
+imutável do piloto promovido. DP-SGD, substituição semântica, rank/NLL e
 controles negativos continuam fora desta investigação.

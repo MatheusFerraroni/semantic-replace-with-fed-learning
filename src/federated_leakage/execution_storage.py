@@ -30,11 +30,12 @@ from .execution_contracts import (
 from .federated_round import validate_federated_round_result
 from .model_contracts import ModelProvenance
 from .synthetic_profiles.storage import validate_storage_component
+from .utility_evaluation import UtilityEvaluationResult, validate_utility_evaluation_result
 
 
-RUN_MANIFEST_SCHEMA_VERSION = "pilot-run-manifest/v2"
-ROUND_COMMIT_SCHEMA_VERSION = "federated-round-commit/v2"
-PAIRED_ROUND_SCHEMA_VERSION = "paired-federated-round/v2"
+RUN_MANIFEST_SCHEMA_VERSION = "pilot-run-manifest/v3"
+ROUND_COMMIT_SCHEMA_VERSION = "federated-round-commit/v3"
+PAIRED_ROUND_SCHEMA_VERSION = "paired-federated-round/v3"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -122,6 +123,39 @@ def _write_idempotent(path: Path, payload: Any) -> None:
         os.chmod(path, 0o600)
         return
     _write_exclusive(path, payload)
+
+
+def _write_idempotent_atomic(path: Path, payload: Any) -> None:
+    raw = _canonical_json_bytes(payload)
+    if path.exists():
+        if path.is_symlink() or not path.is_file() or path.read_bytes() != raw:
+            raise PilotExecutionError("artefato existente diverge da execução")
+        os.chmod(path, 0o600)
+        return
+    handle, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}-",
+        dir=path.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(handle, "wb") as output:
+            output.write(raw)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary, 0o600)
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            if path.is_symlink() or not path.is_file() or path.read_bytes() != raw:
+                raise PilotExecutionError("artefato existente diverge da execução")
+            os.chmod(path, 0o600)
+    except PilotExecutionError:
+        raise
+    except OSError as error:
+        raise PilotExecutionError("falha ao publicar artefato da execução") from error
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _write_atomic(path: Path, payload: Any) -> None:
@@ -235,6 +269,26 @@ def audit_result_from_safe_payload(value: object) -> ExtractionAuditResult:
     return result
 
 
+def utility_result_from_safe_payload(value: object) -> UtilityEvaluationResult:
+    if not isinstance(value, Mapping):
+        raise PilotExecutionError("resultado persistido de utilidade é inválido")
+    expected = frozenset(field.name for field in fields(UtilityEvaluationResult))
+    if frozenset(value) != expected:
+        raise PilotExecutionError("resultado de utilidade possui chaves inválidas")
+    try:
+        payload = dict(value)
+        payload["model_provenance"] = _provenance_from_payload(
+            payload["model_provenance"]
+        )
+        result = UtilityEvaluationResult(**payload)
+        validate_utility_evaluation_result(result)
+    except Exception as error:
+        raise PilotExecutionError("resultado persistido de utilidade diverge") from error
+    if result.as_safe_dict() != dict(value):
+        raise PilotExecutionError("resultado persistido de utilidade não é canônico")
+    return result
+
+
 def _run_manifest_payload(
     identity: PilotRunIdentity,
     spec: PilotExecutionSpec,
@@ -256,6 +310,15 @@ def _run_manifest_payload(
         "sensitivity_target_counts": list(spec.sensitivity_target_counts),
         "retained_rounds": list(spec.retained_rounds),
         "expected_generation_count": spec.expected_generation_count,
+        "learning_rate_millionths": identity.learning_rate_millionths,
+        "utility_evaluation": {
+            "schema_version": spec.utility_evaluation.schema_version,
+            "dataset_schema_version": spec.utility_evaluation.dataset_schema_version,
+            "result_schema_version": spec.utility_evaluation.result_schema_version,
+            "checkpoints": list(spec.utility_evaluation.checkpoints),
+            "automatic_gate": False,
+            "human_review_required": True,
+        },
         "paths": {
             "dataset": f"datasets/{identity.dataset_id}",
             "baseline": "baseline",
@@ -337,6 +400,7 @@ def mark_baseline_completed(
     paths: PilotRunPaths,
     baseline_model_sha256: str,
     audits: Sequence[ExtractionAuditResult],
+    utility_result: UtilityEvaluationResult,
 ) -> str:
     resolved = tuple(sorted(audits, key=lambda result: result.target_count))
     if tuple(result.target_count for result in resolved) != (1, 5, 20, 200):
@@ -349,18 +413,27 @@ def mark_baseline_completed(
         }
         for result in resolved
     ]
+    try:
+        utility = validate_utility_evaluation_result(utility_result)
+    except Exception as error:
+        raise PilotExecutionError("utilidade B0 é inválida") from error
+    if utility.scenario != "B0" or utility.model_state_sha256 != baseline_model_sha256:
+        raise PilotExecutionError("utilidade B0 diverge do baseline")
+    utility_sha256 = safe_payload_sha256(utility.as_safe_dict())
     baseline_audit_sha256 = safe_payload_sha256(
         {
-            "schema_version": "pilot-baseline-audits/v2",
+            "schema_version": "pilot-baseline-audits/v3",
             "audits": audit_payload,
         }
     )
     payload = {
-        "schema_version": "pilot-baseline/v2",
+        "schema_version": "pilot-baseline/v3",
         "baseline_model_sha256": baseline_model_sha256,
         "baseline_audit_sha256": baseline_audit_sha256,
         "audits": audit_payload,
+        "utility_result_sha256": utility_sha256,
     }
+    write_utility_result(paths, utility)
     _write_idempotent(paths.run_root / "baseline" / "completed.json", payload)
     return baseline_audit_sha256
 
@@ -478,6 +551,7 @@ def _round_commit_payload(
     auxiliary_manifest: Mapping[str, Any],
     checkpoint_id: str,
     checkpoint_artifact_sha256: str,
+    utility_result: UtilityEvaluationResult | None,
 ) -> dict[str, Any]:
     return {
         "schema_version": ROUND_COMMIT_SCHEMA_VERSION,
@@ -489,6 +563,9 @@ def _round_commit_payload(
         "auxiliary_manifest": dict(auxiliary_manifest),
         "checkpoint_id": checkpoint_id,
         "checkpoint_artifact_sha256": checkpoint_artifact_sha256,
+        "utility_result": (
+            utility_result.as_safe_dict() if utility_result is not None else None
+        ),
     }
 
 
@@ -540,6 +617,7 @@ def commit_trajectory_round(
     checkpoint_id: str,
     checkpoint_artifact_sha256: str,
     baseline_model_sha256: str,
+    utility_result: UtilityEvaluationResult | None = None,
 ) -> FederatedTrajectoryState:
     result = validate_federated_round_result(round_result)
     if result.scenario not in {"F0", "F1"}:
@@ -548,6 +626,22 @@ def commit_trajectory_round(
     expected_targets = (1, 5, 20, 200) if result.round_id == 20 else (20,)
     if tuple(sorted(audit.target_count for audit in resolved_audits)) != expected_targets:
         raise PilotExecutionError("auditorias da rodada estão incompletas")
+    if result.round_id == 20:
+        if utility_result is None:
+            raise PilotExecutionError("utilidade da rodada final está ausente")
+        try:
+            utility = validate_utility_evaluation_result(utility_result)
+        except Exception as error:
+            raise PilotExecutionError("utilidade da rodada final é inválida") from error
+        if (
+            utility.scenario != result.scenario
+            or utility.round_id != result.round_id
+            or utility.model_state_sha256 != result.final_model_sha256
+        ):
+            raise PilotExecutionError("utilidade diverge da rodada final")
+        write_utility_result(paths, utility)
+    elif utility_result is not None:
+        raise PilotExecutionError("utilidade só pode integrar a rodada final")
     current = read_trajectory_state(
         paths,
         result.scenario,
@@ -561,6 +655,7 @@ def commit_trajectory_round(
         auxiliary_manifest,
         checkpoint_id,
         checkpoint_artifact_sha256,
+        utility_result,
     )
     round_path = (
         paths.trajectory_root(result.scenario)
@@ -589,7 +684,13 @@ def read_committed_round(
     paths: PilotRunPaths,
     scenario: str,
     round_id: int,
-) -> tuple[FedAvgRoundResult, Tuple[ExtractionAuditResult, ...], str, str]:
+) -> tuple[
+    FedAvgRoundResult,
+    Tuple[ExtractionAuditResult, ...],
+    str,
+    str,
+    UtilityEvaluationResult | None,
+]:
     payload = _read_canonical_json(
         paths.trajectory_root(scenario)
         / "rounds"
@@ -603,6 +704,7 @@ def read_committed_round(
             "auxiliary_manifest",
             "checkpoint_id",
             "checkpoint_artifact_sha256",
+            "utility_result",
         }
     )
     if (
@@ -617,15 +719,22 @@ def read_committed_round(
     audits = tuple(audit_result_from_safe_payload(item) for item in audits_raw)
     checkpoint_id = payload.get("checkpoint_id")
     artifact_sha = payload.get("checkpoint_artifact_sha256")
+    raw_utility = payload.get("utility_result")
+    utility = (
+        utility_result_from_safe_payload(raw_utility)
+        if raw_utility is not None
+        else None
+    )
     if (
         result.scenario != scenario
         or result.round_id != round_id
         or not isinstance(checkpoint_id, str)
         or not isinstance(artifact_sha, str)
         or len(artifact_sha) != 64
+        or (round_id == 20) != (utility is not None)
     ):
         raise PilotExecutionError("identidade persistida da rodada diverge")
-    return result, audits, checkpoint_id, artifact_sha
+    return result, audits, checkpoint_id, artifact_sha, utility
 
 
 def commit_paired_round(
@@ -633,7 +742,30 @@ def commit_paired_round(
     benign: FedAvgRoundResult,
     adversarial: FedAvgRoundResult,
     audit_pairs: Sequence[tuple[ExtractionAuditResult, ExtractionAuditResult]],
+    utility_pair: tuple[
+        UtilityEvaluationResult,
+        UtilityEvaluationResult,
+    ] | None = None,
 ) -> None:
+    if benign.round_id == 20:
+        if utility_pair is None:
+            raise PilotExecutionError("par de utilidade da rodada final está ausente")
+        first, second = utility_pair
+        try:
+            validate_utility_evaluation_result(first)
+            validate_utility_evaluation_result(second)
+        except Exception as error:
+            raise PilotExecutionError("par de utilidade é inválido") from error
+        if (
+            first.scenario != "F0"
+            or second.scenario != "F1"
+            or first.dataset_sha256 != second.dataset_sha256
+            or first.model_state_sha256 != benign.final_model_sha256
+            or second.model_state_sha256 != adversarial.final_model_sha256
+        ):
+            raise PilotExecutionError("par de utilidade diverge da rodada final")
+    elif utility_pair is not None:
+        raise PilotExecutionError("par de utilidade só pode existir na rodada final")
     payload = {
         "schema_version": PAIRED_ROUND_SCHEMA_VERSION,
         "round_id": benign.round_id,
@@ -649,10 +781,55 @@ def commit_paired_round(
             }
             for first, second in sorted(audit_pairs, key=lambda pair: pair[0].target_count)
         ],
+        "utility_pair": (
+            {
+                "benign_result_sha256": safe_payload_sha256(
+                    utility_pair[0].as_safe_dict()
+                ),
+                "adversarial_result_sha256": safe_payload_sha256(
+                    utility_pair[1].as_safe_dict()
+                ),
+            }
+            if utility_pair is not None
+            else None
+        ),
     }
     _write_idempotent(
         paths.run_root / "paired" / f"round-{benign.round_id:03d}.json",
         payload,
+    )
+
+
+def utility_result_path(paths: PilotRunPaths, scenario: str) -> Path:
+    if scenario == "B0":
+        return paths.run_root / "baseline" / "evaluator" / "utility" / "summary.json"
+    if scenario in {"F0", "F1"}:
+        return paths.trajectory_root(scenario) / "evaluator" / "utility" / "round-020.json"
+    raise PilotExecutionError("cenário da utilidade é inválido")
+
+
+def write_utility_result(
+    paths: PilotRunPaths,
+    result: UtilityEvaluationResult,
+) -> None:
+    try:
+        resolved = validate_utility_evaluation_result(result)
+    except Exception as error:
+        raise PilotExecutionError("resultado de utilidade é inválido") from error
+    path = utility_result_path(paths, resolved.scenario)
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if path.parent.is_symlink() or not path.parent.is_dir():
+        raise PilotExecutionError("diretório da utilidade é inválido")
+    os.chmod(path.parent, 0o700)
+    _write_idempotent_atomic(path, resolved.as_safe_dict())
+
+
+def read_utility_result(
+    paths: PilotRunPaths,
+    scenario: str,
+) -> UtilityEvaluationResult:
+    return utility_result_from_safe_payload(
+        _read_canonical_json(utility_result_path(paths, scenario))
     )
 
 
@@ -704,5 +881,9 @@ __all__ = [
     "remove_obsolete_resume_checkpoints",
     "round_result_from_safe_payload",
     "safe_payload_sha256",
+    "read_utility_result",
+    "utility_result_from_safe_payload",
+    "utility_result_path",
+    "write_utility_result",
     "write_pilot_completed",
 ]

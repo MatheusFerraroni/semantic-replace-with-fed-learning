@@ -29,6 +29,9 @@ rótulos impedem apenas acoplamento acidental das sequências. O isolamento do
 experimento depende da orquestração: cada componente recebe somente sua API e
 seu caminho local, nunca objetos ou arquivos de outro papel.
 
+Canários e utilidade usam namespaces próprios. O fluxo `utility` não inclui
+cenário, rodada ou `k` e permanece disjunto de vítimas, auxiliar e canários.
+
 ## Contrato de conversa
 
 `TrainingConversation` contém o texto ainda não tokenizado, IDs técnicos locais,
@@ -68,6 +71,19 @@ estável, e a derivação não inclui rodada, cenário nem `k`.
 Nos 80 registros adversários, a perda começa depois do prefixo e cobre a
 continuação canônica completa. As 20 conversas gerais usam perda integral nas
 duas apresentações.
+
+## Dataset held-out de utilidade
+
+`HeldoutUtilityDatasetGenerator` recebe a seed e cria 100 perfis exclusivos do
+fluxo `utility`, com 500 conversas: quatro protegidas e uma geral por entidade.
+Todas usam `all_tokens`. O preflight do piloto v3 rejeita colisões dos campos
+únicos contra vítimas, as 20 rodadas auxiliares nas duas apresentações e os
+canários positivos.
+
+Esse dataset existe somente em memória. Suas conversas são tokenizadas uma vez
+e reutilizadas em B0, F0-r20 e F1-r20; textos, tokens, valores e entidades não
+são publicados. A persistência contém apenas resultados agregados e o hash do
+dataset.
 
 ## Tokenização em memória
 
@@ -165,6 +181,7 @@ são opcionais; nenhum destino existente é sobrescrito.
 ```python
 from federated_leakage.synthetic_profiles import (
     AuxiliaryRoundGenerator,
+    HeldoutUtilityDatasetGenerator,
     PositiveCanaryDatasetGenerator,
     VictimDatasetGenerator,
     read_auxiliary_round,
@@ -182,6 +199,7 @@ adversarial_round = generator.generate(round_id=1, presentation="adversarial")
 
 victim_datasets = VictimDatasetGenerator(11).generate()
 positive_canaries = PositiveCanaryDatasetGenerator(101).generate()
+heldout_utility = HeldoutUtilityDatasetGenerator(101).generate()
 
 output_root = Path("outputs/datasets")
 dataset_id = "seed-11-main-v4"
@@ -200,7 +218,7 @@ auxiliary_round_01 = read_auxiliary_round(
 )
 
 # Depois do treinamento local, descarte os objetos em memória.
-del benign_round, adversarial_round, victim_datasets
+del benign_round, adversarial_round, victim_datasets, heldout_utility
 ```
 
 O gerador canário usa namespace próprio, produz um cliente com 20 entidades e

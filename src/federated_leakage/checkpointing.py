@@ -28,6 +28,10 @@ from .model_updates import (
     restore_model_parameter_snapshot,
 )
 from .synthetic_profiles.storage import validate_storage_component
+from .utility_evaluation import (
+    UtilityEvaluationResult,
+    validate_utility_evaluation_result,
+)
 
 
 _CHECKPOINT_FILES = frozenset(
@@ -248,6 +252,14 @@ def _validate_metadata(metadata: object) -> FederatedCheckpointMetadata:
         != expected_targets
         or metadata.seed_derivation
         != "sha256_domain_separated_from_single_experiment_seed"
+        or (
+            metadata.round_id == 20
+            and not _is_sha256(metadata.utility_result_sha256)
+        )
+        or (
+            metadata.round_id != 20
+            and metadata.utility_result_sha256 is not None
+        )
     ):
         raise PilotExecutionError("metadados do checkpoint divergem do piloto")
     for marker in metadata.audit_markers:
@@ -278,6 +290,7 @@ def build_federated_checkpoint_metadata(
     baseline_model_sha256: str,
     baseline_audit_sha256: str,
     canonical_template_sha256: str,
+    utility_result: UtilityEvaluationResult | None = None,
 ) -> FederatedCheckpointMetadata:
     resolved_audits = tuple(sorted(audits, key=lambda result: result.target_count))
     round_payload = round_result.as_safe_dict()
@@ -302,6 +315,27 @@ def build_federated_checkpoint_metadata(
                 model_state_sha256=audit.model_state_sha256,
             )
         )
+    if round_result.round_id == 20:
+        if utility_result is None:
+            raise PilotExecutionError("utilidade da rodada final está ausente")
+        try:
+            validate_utility_evaluation_result(utility_result)
+        except Exception as error:
+            raise PilotExecutionError("utilidade do checkpoint é inválida") from error
+        if (
+            utility_result.scenario != round_result.scenario
+            or utility_result.round_id != round_result.round_id
+            or utility_result.model_state_sha256 != round_result.final_model_sha256
+            or utility_result.model_provenance != round_result.model_provenance
+        ):
+            raise PilotExecutionError("utilidade diverge da rodada do checkpoint")
+        utility_result_sha256 = _sha256(
+            _canonical_json_bytes(utility_result.as_safe_dict())
+        )
+    elif utility_result is not None:
+        raise PilotExecutionError("utilidade só pode integrar a rodada final")
+    else:
+        utility_result_sha256 = None
     return _validate_metadata(
         FederatedCheckpointMetadata(
             scenario=round_result.scenario,
@@ -318,6 +352,7 @@ def build_federated_checkpoint_metadata(
             canonical_template_sha256=canonical_template_sha256,
             round_result_sha256=_sha256(_canonical_json_bytes(round_payload)),
             audit_markers=tuple(markers),
+            utility_result_sha256=utility_result_sha256,
             model_provenance=round_result.model_provenance,
         )
     )

@@ -175,11 +175,20 @@ todos os parâmetros do Tucano 2 0.6B.
   prompts greedy. Considerar o controle calibrado somente com pelo menos 10 pares
   distintivos exatos distribuídos por pelo menos cinco canários; executar todas
   as taxas e registrar resultado negativo sem escalada automática.
+- A investigação v4 selecionou `3e-5` como o menor learning rate testado que
+  atingiu o gate: 100/100 pares distintivos e 20/20 canários, com o baseline
+  reprovado. O piloto promovido usa essa taxa igualmente nos 10 clientes-vítima
+  e no auxiliar, mas sempre começa do Tucano 2 pinado, nunca do checkpoint
+  canário.
 - Manter dados, checkpoints e artefatos privados da calibração separados do
   piloto e da campanha. O piloto greedy exige um braço aprovado, o baseline
   reprovado e uma integração versionada explícita do gate vigente.
   `calibrated=false` ou `baseline_gate_passed=true` bloqueia o piloto e o
   desenvolvimento das defesas até decisão explícita de protocolo.
+- Avaliar utilidade sintética held-out no piloto promovido em B0, F0 rodada 20
+  e F1 rodada 20, usando 100 perfis e 500 conversas exclusivas do fluxo de
+  utilidade. Relatar perda média por conversa, NLL por token e perplexidade sem
+  limiar automático; a promoção da receita continua sujeita a revisão humana.
 
 ## Regras de implementação
 
@@ -197,10 +206,10 @@ todos os parâmetros do Tucano 2 0.6B.
   restauração ou intermediários grandes sem necessidade.
 - Preferir rotinas retomáveis para geração, treinamento e auditoria demorados.
 - Executar o piloto em uma única L40S pelo launcher
-  `scripts/run_pilot_l40s.sbatch`, sempre com modo explícito `preflight`,
-  `start` ou `resume`. Usar dependência Slurm `singleton`, manter os logs na
-  raiz ignorada do projeto e retomar manualmente após `TIMEOUT`; não configurar
-  requeue automático.
+  `scripts/run_pilot_lr_000030_l40s.sbatch`, sempre com modo explícito
+  `preflight`, `start` ou `resume`. O launcher anterior permanece histórico.
+  Usar dependência Slurm `singleton`, manter os logs na raiz ignorada do projeto
+  e retomar manualmente após `TIMEOUT`; não configurar requeue automático.
 - Executar a investigação de learning rate em uma única L40S pelo launcher
   `scripts/run_learning_rate_calibration_l40s.sbatch`, também com modo
   explícito, ambiente offline, dependência `singleton` e retomada manual. O

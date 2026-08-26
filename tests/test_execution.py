@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +28,11 @@ from federated_leakage.execution_contracts import (
     build_pilot_run_identity,
     load_pilot_execution_spec_from_config,
 )
+from federated_leakage.execution_storage import (
+    PilotRunPaths,
+    utility_result_path,
+    write_utility_result,
+)
 from federated_leakage.model_contracts import (
     BASE_MODEL_ID,
     BASE_MODEL_REVISION,
@@ -40,6 +46,11 @@ from federated_leakage.pilot_execution import (
     run_paired_pilot,
     validate_paired_federated_trajectory_results,
 )
+from federated_leakage.utility_evaluation import (
+    PreparedUtilityEvaluation,
+    UtilityEvaluationResult,
+)
+from federated_leakage import utility_evaluation as utility_module
 
 
 def _provenance(parameter_count=1):
@@ -178,9 +189,38 @@ def _audit_result(
     )
 
 
+def _utility_result(*, scenario="B0", model_hash="0" * 64):
+    round_id = 0 if scenario == "B0" else 20
+    checkpoint_id = "B0" if scenario == "B0" else f"{scenario}-round-020"
+    draft = UtilityEvaluationResult(
+        checkpoint_id=checkpoint_id,
+        scenario=scenario,
+        round_id=round_id,
+        experiment_seed=101,
+        dataset_sha256="9" * 64,
+        model_state_sha256=model_hash,
+        model_provenance=_provenance(),
+        conversation_count=500,
+        supervised_token_count=1_000,
+        mean_conversation_loss=1.0,
+        token_weighted_nll=1.0,
+        perplexity=math.exp(1.0),
+        elapsed_seconds=0.25,
+        peak_device_memory_bytes=None,
+        scientific_sha256="0" * 64,
+    )
+    return dataclasses.replace(
+        draft,
+        scientific_sha256=utility_module._hash(
+            utility_module._scientific_payload(draft),
+            b"utility-evaluation-result/v1",
+        ),
+    )
+
+
 class ExecutionContractTests(unittest.TestCase):
     def test_loads_fixed_pilot_and_rejects_drift_and_unsafe_id(self):
-        spec = load_pilot_execution_spec_from_config(Path("configs/main-v2.yaml"))
+        spec = load_pilot_execution_spec_from_config(Path("configs/main-v3.yaml"))
         self.assertEqual(spec.experiment_seed, 101)
         self.assertEqual(spec.auxiliary_weight_units, 1)
         self.assertEqual(spec.expected_generation_count, 12_992)
@@ -189,7 +229,7 @@ class ExecutionContractTests(unittest.TestCase):
             calibration_result_sha256="c" * 64,
             calibration_manifest_sha256="d" * 64,
         )
-        self.assertEqual(identity.run_id, "pilot-greedy-seed-101-k01-v2")
+        self.assertEqual(identity.run_id, "pilot-greedy-lr-000030-seed-101-k01-v3")
         self.assertTrue(identity.dataset_id.endswith("-v4"))
         with self.assertRaises(PilotExecutionError):
             build_pilot_run_identity(
@@ -199,7 +239,7 @@ class ExecutionContractTests(unittest.TestCase):
                 calibration_manifest_sha256="d" * 64,
             )
 
-        config = yaml.safe_load(Path("configs/main-v2.yaml").read_text())
+        config = yaml.safe_load(Path("configs/main-v3.yaml").read_text())
         config["pilot"]["auxiliary_weight_units"] = 2
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "invalid.yaml"
@@ -208,7 +248,7 @@ class ExecutionContractTests(unittest.TestCase):
                 load_pilot_execution_spec_from_config(path)
 
     def test_rejects_unknown_and_duplicate_pilot_configuration_keys(self):
-        config = yaml.safe_load(Path("configs/main-v2.yaml").read_text())
+        config = yaml.safe_load(Path("configs/main-v3.yaml").read_text())
         config["pilot"]["unexpected"] = True
         with tempfile.TemporaryDirectory() as directory:
             unknown = Path(directory) / "unknown.yaml"
@@ -218,7 +258,7 @@ class ExecutionContractTests(unittest.TestCase):
 
             duplicate = Path(directory) / "duplicate.yaml"
             duplicate.write_text(
-                Path("configs/main-v2.yaml").read_text(encoding="utf-8")
+                Path("configs/main-v3.yaml").read_text(encoding="utf-8")
                 + "\npilot:\n  required_before_main_campaign: true\n",
                 encoding="utf-8",
             )
@@ -391,9 +431,37 @@ class CheckpointTests(unittest.TestCase):
                     )
 
 
+class UtilityStorageTests(unittest.TestCase):
+    def test_publication_failure_leaves_no_partial_utility_result(self):
+        spec = load_pilot_execution_spec_from_config(Path("configs/main-v3.yaml"))
+        identity = build_pilot_run_identity(
+            spec,
+            run_id="utility-publication-test",
+            calibration_result_sha256="c" * 64,
+            calibration_manifest_sha256="d" * 64,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = PilotRunPaths(
+                output_root=root,
+                run_root=root / "runs" / identity.run_id,
+                dataset_root=root / "datasets",
+                identity=identity,
+            )
+            paths.run_root.mkdir(parents=True)
+            with mock.patch(
+                "federated_leakage.execution_storage.os.link",
+                side_effect=OSError("falha-injetada"),
+            ), self.assertRaises(PilotExecutionError):
+                write_utility_result(paths, _utility_result())
+            destination = utility_result_path(paths, "B0")
+            self.assertFalse(destination.exists())
+            self.assertEqual(tuple(destination.parent.iterdir()), ())
+
+
 class PairedPilotOrchestrationTests(unittest.TestCase):
     def test_preflight_only_validates_model_without_publishing_outputs(self):
-        spec = load_pilot_execution_spec_from_config(Path("configs/main-v2.yaml"))
+        spec = load_pilot_execution_spec_from_config(Path("configs/main-v3.yaml"))
         identity = build_pilot_run_identity(
             spec,
             run_id="preflight-test",
@@ -407,6 +475,14 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
         ), mock.patch(
             "federated_leakage.pilot_execution.prepare_victim_training_inputs",
             return_value=SimpleNamespace(),
+        ), mock.patch(
+            "federated_leakage.pilot_execution.prepare_utility_evaluation",
+            return_value=PreparedUtilityEvaluation(
+                dataset_sha256="9" * 64,
+                samples=(),
+                conversation_count=500,
+                supervised_token_count=1_000,
+            ),
         ), mock.patch(
             "federated_leakage.pilot_execution.prepare_trusted_evaluator",
             side_effect=lambda *args, target_count, **kwargs: SimpleNamespace(
@@ -426,7 +502,7 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             result = run_paired_pilot(
                 spec,
                 identity,
-                config_path=Path("configs/main-v2.yaml"),
+                config_path=Path("configs/main-v3.yaml"),
                 output_root=Path(directory),
                 device="cpu",
                 preflight_only=True,
@@ -438,7 +514,7 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             self.assertEqual(tuple(Path(directory).iterdir()), ())
 
     def test_runs_full_simulated_pilot_and_revalidates_completed_run(self):
-        spec = load_pilot_execution_spec_from_config(Path("configs/main-v2.yaml"))
+        spec = load_pilot_execution_spec_from_config(Path("configs/main-v3.yaml"))
         identity = build_pilot_run_identity(
             spec,
             run_id="test-pilot",
@@ -454,6 +530,7 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
 
         baseline_hash = "0" * 64
         round_calls = []
+        round_learning_rates = []
         audit_calls = []
         audit_invocations = []
         audit_cache = {}
@@ -461,6 +538,7 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
 
         def fake_round(*args, scenario, round_id, **kwargs):
             round_calls.append((scenario, round_id))
+            round_learning_rates.append(args[3].learning_rate)
             final = ("a" if scenario == "F0" else "b") + f"{round_id:063x}"
             initial = (
                 baseline_hash
@@ -539,6 +617,14 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
                 baseline_model_sha256=baseline_hash,
                 baseline_audit_sha256=kwargs["expected_baseline_audit_sha256"],
                 canonical_template_sha256="5" * 64,
+                utility_result=(
+                    _utility_result(
+                        scenario=scenario,
+                        model_hash=result.final_model_sha256,
+                    )
+                    if round_id == 20
+                    else None
+                ),
             )
             return LoadedFederatedCheckpoint(
                 metadata=metadata,
@@ -553,6 +639,26 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             "federated_leakage.pilot_execution.prepare_victim_training_inputs",
             return_value=SimpleNamespace(),
         ), mock.patch(
+            "federated_leakage.pilot_execution.prepare_utility_evaluation",
+            return_value=PreparedUtilityEvaluation(
+                dataset_sha256="9" * 64,
+                samples=(),
+                conversation_count=500,
+                supervised_token_count=1_000,
+            ),
+        ), mock.patch(
+            "federated_leakage.pilot_execution.evaluate_utility",
+            side_effect=lambda spec, prepared, bundle, scenario, round_id, **kwargs: (
+                _utility_result(
+                    scenario=scenario,
+                    model_hash=(
+                        baseline_hash
+                        if scenario == "B0"
+                        else (("a" if scenario == "F0" else "b") + f"{round_id:063x}")[-64:]
+                    ),
+                )
+            ),
+        ) as utility_evaluator, mock.patch(
             "federated_leakage.pilot_execution.prepare_auxiliary_training_input",
             return_value=SimpleNamespace(),
         ), mock.patch(
@@ -590,7 +696,7 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
                 run_paired_pilot(
                     spec,
                     identity,
-                    config_path=Path("configs/main-v2.yaml"),
+                    config_path=Path("configs/main-v3.yaml"),
                     output_root=Path(directory),
                     device="cpu",
                     model_loader=loader,
@@ -619,7 +725,7 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             result = run_paired_pilot(
                 spec,
                 identity,
-                config_path=Path("configs/main-v2.yaml"),
+                config_path=Path("configs/main-v3.yaml"),
                 output_root=Path(directory),
                 device="cpu",
                 model_loader=loader,
@@ -629,11 +735,13 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             self.assertEqual(result.total_optimizer_steps, 11_000)
             self.assertEqual(result.total_audit_generations, 12_992)
             self.assertEqual(len(round_calls), 41)
+            self.assertEqual(set(round_learning_rates), {3e-5})
             self.assertEqual(round_calls.count(("F1", 2)), 2)
             self.assertEqual(round_calls.count(("F0", 1)), 1)
             self.assertEqual(round_calls.count(("F0", 20)), 1)
             self.assertEqual(round_calls.count(("F1", 1)), 1)
             self.assertEqual(len(audit_calls), 50)
+            self.assertEqual(utility_evaluator.call_count, 3)
             self.assertEqual(audit_calls.count(("F1", 2, 20)), 1)
             self.assertEqual(audit_invocations.count(("F1", 2, 20)), 2)
             validate_paired_federated_trajectory_results(*result.trajectories)
@@ -711,13 +819,41 @@ class PairedPilotOrchestrationTests(unittest.TestCase):
             repeated = run_paired_pilot(
                 spec,
                 identity,
-                config_path=Path("configs/main-v2.yaml"),
+                config_path=Path("configs/main-v3.yaml"),
                 output_root=Path(directory),
                 device="cpu",
                 model_loader=loader,
             )
             self.assertEqual(repeated.as_safe_dict(), result.as_safe_dict())
             self.assertEqual(len(round_calls), 41)
+            self.assertEqual(utility_evaluator.call_count, 3)
+
+            utility_path = (
+                Path(directory)
+                / "runs/test-pilot/baseline/evaluator/utility/summary.json"
+            )
+            tampered_utility = json.loads(utility_path.read_text(encoding="utf-8"))
+            tampered_utility["conversation_count"] = 499
+            utility_path.write_text(
+                json.dumps(
+                    tampered_utility,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(PilotExecutionError):
+                run_paired_pilot(
+                    spec,
+                    identity,
+                    config_path=Path("configs/main-v3.yaml"),
+                    output_root=Path(directory),
+                    device="cpu",
+                    model_loader=loader,
+                )
 
 
 if __name__ == "__main__":

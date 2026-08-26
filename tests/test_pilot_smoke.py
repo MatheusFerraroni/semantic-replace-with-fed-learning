@@ -17,7 +17,7 @@ from federated_leakage.pilot_execution import run_paired_pilot
 )
 class RealPilotPreflightSmokeTests(unittest.TestCase):
     def test_validates_real_model_tokenizer_and_all_synthetic_schedules_offline(self):
-        config = Path("configs/main-v2.yaml")
+        config = Path("configs/main-v3.yaml")
         spec = load_pilot_execution_spec_from_config(config)
         gate = load_completed_calibration_gate(Path("outputs"), spec)
         identity = build_pilot_run_identity(
@@ -38,6 +38,10 @@ class RealPilotPreflightSmokeTests(unittest.TestCase):
         self.assertTrue(result.tokenization_validated)
         self.assertEqual(result.victim_conversation_count, 1_000)
         self.assertEqual(result.auxiliary_conversation_count, 4_000)
+        self.assertEqual(result.utility_profile_count, 100)
+        self.assertEqual(result.utility_conversation_count, 500)
+        self.assertTrue(result.utility_tokenization_validated)
+        self.assertIsNotNone(result.utility_dataset_sha256)
         self.assertIsNotNone(result.model_state_sha256)
 
 

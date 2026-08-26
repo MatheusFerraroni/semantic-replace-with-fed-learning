@@ -2,68 +2,83 @@
 
 ## Escopo implementado
 
-Este runner ainda exige a calibração greedy v2, cujo gate concluído foi
-negativo, e portanto permanece bloqueado. A calibração ampliada v3 não altera
-essa ligação: se ela passar, uma mudança versionada posterior deverá integrar o
-novo gate antes de qualquer preflight ou execução do piloto.
-
 O comando `federated_leakage.run_pilot` executa exclusivamente o piloto de
-desenvolvimento não privado fixado em `configs/main-v2.yaml`:
+desenvolvimento não privado fixado em `configs/main-v3.yaml`:
 
-- seed `101` e agenda auxiliar `F0-F1`;
-- `k=1`, com peso `1/11` por vítima e `1/11` para o auxiliar;
+- seed `101`, agenda `F0-F1` e `k=1`;
+- AdamW `3e-5` nos dez clientes-vítima e no auxiliar;
 - uma auditoria B0 compartilhada;
-- 20 rodadas F0 seguidas de recarga do baseline e 20 rodadas F1;
-- auditoria de 20 alvos após todas as rodadas;
-- auditorias adicionais de 1, 5 e 200 alvos em B0 e na rodada 20.
+- 20 rodadas F0, recarga do Tucano 2 pinado e 20 rodadas F1;
+- auditoria greedy de 20 alvos após todas as rodadas;
+- auditorias adicionais de 1, 5 e 200 alvos em B0 e na rodada 20;
+- utilidade held-out em B0, F0 rodada 20 e F1 rodada 20.
 
-Isso totaliza 40 rodadas federadas, 44.000 conversas processadas, 11.000 passos
-locais e 12.992 gerações de auditoria greedy. F2-F5, a varredura `k=1..10` e a campanha
-principal de 405 execuções não fazem parte deste comando.
+Isso totaliza 40 rodadas, 44.000 conversas de treinamento, 11.000 passos locais,
+12.992 gerações de extração e 1.500 avaliações de conversa de utilidade. F2-F5,
+a varredura `k=1..10` e a campanha principal não fazem parte deste comando.
 
-B0 usa 2.038 gerações: 181 para o orçamento de referência e 10, 46 e 1.801
-para as sensibilidades. Cada trajetória usa 5.477: 20 auditorias de 181, mais
-10, 46 e 1.801 na rodada 20. Orçamentos permanecem em artefatos separados.
+## Gate da calibração v4
 
-## Contrato de determinismo CUDA
+Antes do modelo ou de qualquer escrita, o runner lê estritamente o marcador
+`outputs/runs/memorization-calibration-greedy-lr-seed-101-v4/completed.json` e
+seu manifesto seguro. O resultado aceito é fixado por SHA-256 em `main-v3` e
+exige:
 
-Antes de iniciar qualquer processo Python que use CUDA determinístico, o
-ambiente deve conter exatamente:
+- baseline reprovado;
+- `calibrated=true`;
+- primeiro braço aprovado `lr-000030`;
+- 100/100 pares distintivos exatos e 20/20 canários expostos nesse braço;
+- hashes compatíveis de configuração, dataset, preflight, modelo, agendas e
+  proveniência.
+
+O checkpoint treinado da calibração não é carregado. O piloto começa sempre do
+baseline `Polygl0t/Tucano2-0.6B-Base` pinado, e o fingerprint desse baseline deve
+coincidir com o auditado na calibração.
+
+## Utilidade sintética
+
+O fluxo `utility` produz em memória 100 perfis disjuntos e 500 conversas: quatro
+protegidas e uma geral por perfil, todas com perda integral. Colisões de nome,
+CPF, RG, telefone, e-mail e endereço são rejeitadas contra vítimas, toda a
+agenda auxiliar e canários. Datas e horários permanecem repetíveis conforme o
+protocolo.
+
+As 500 conversas são tokenizadas uma vez e reutilizadas nos três checkpoints.
+O avaliador não gera texto, não calcula gradientes e não altera o modelo. Ele
+relata somente:
+
+- perda causal média por conversa;
+- NLL ponderada por token;
+- perplexidade;
+- contagens, tempo e pico de memória;
+- deltas de F0/F1 contra B0.
+
+Não há limiar automático. Texto, tokens, valores e entidades de utilidade não
+são persistidos; somente resultados agregados e hashes entram na transação.
+
+## Determinismo CUDA e preflight
+
+Antes de qualquer processo Python com CUDA, exporte exatamente:
 
 ```bash
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 ```
 
-Esse valor integra a receita em `reproducibility.cuda_cublas_workspace_config`.
-O piloto, o treinamento local e o avaliador validam a variável antes de usar o
-modelo ou o RNG. Valor ausente ou divergente encerra a execução; o Python não
-define, substitui nem corrige o ambiente. CPU e MPS não exigem essa variável.
-
-## Preflight
-
-O preflight completo ocorre antes de qualquer escrita. Ele gera em memória os
-dez datasets das vítimas e os 40 lotes auxiliares pareados, valida colisões e
-agendas e descarta os lotes auxiliares. Depois carrega o modelo estritamente
-offline, tokeniza as vítimas uma vez e verifica os quatro orçamentos com o
-tokenizador real.
+O Python falha se a variável estiver ausente ou divergente e não a corrige. O
+launcher também fixa o cache offline. Para validar gate, dados, colisões, modelo,
+tokenização, agendas de auditoria e utilidade sem escrever:
 
 ```bash
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_pilot \
-  --config configs/main-v2.yaml \
+  --config configs/main-v3.yaml \
   --device cuda \
   --preflight-only
 ```
 
-`--preflight-only` não cria datasets, diretórios da execução, auditorias ou
-checkpoints. Antes dele, o runner exige o marcador concluído da calibração
-`memorization-calibration-greedy-seed-101-v2`: algum braço teria de passar o
-gate e o baseline não. O marcador observado possui `calibrated=false`, portanto
-esse comando falha antes da execução. O resultado, manifesto, dataset canário,
-preflight de colisões, estratégia, baseline e proveniência devem coincidir com a
-configuração v2. O dispositivo solicitado deve existir; não há fallback para
-CPU.
+O preflight deve confirmar 1.000 conversas-vítima, 4.000 auxiliares e 500 de
+utilidade, mas não cria datasets, auditorias ou checkpoints.
 
 ## Execução e retomada
 
@@ -71,155 +86,90 @@ CPU.
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 python -m federated_leakage.run_pilot \
-  --config configs/main-v2.yaml \
+  --config configs/main-v3.yaml \
   --device cuda
 ```
 
-O `run_id` padrão é `pilot-greedy-seed-101-k01-v2`. Uma segunda chamada compatível retoma
-o último estado confirmado; se `completed.json` já existir, todos os artefatos
-necessários são relidos e revalidados sem repetir treinamento ou gerações.
-Ambas as trajetórias registram o fingerprint do mesmo baseline e o hash agregado
-das quatro auditorias B0 compartilhadas. Na rodada 1, F0 e F1 partem desse mesmo
-baseline. A partir da rodada 2, cada cenário parte exclusivamente de seu próprio
-modelo final anterior; a validação pareada compara dados, pesos, seeds, agenda e
-proveniência, mas não exige que os modelos correntes dos dois braços coincidam.
-`--fresh` recusa qualquer diretório de execução existente. Os argumentos
-operacionais opcionais são:
+O `run_id` padrão é `pilot-greedy-lr-000030-seed-101-k01-v3`. `--fresh` exige
+que esse diretório ainda não exista; sem ele, uma execução compatível retoma o
+último estado confirmado. Também são aceitos `--cache-dir`,
+`--model-artifact-dir`, `--output-root` e `--run-id`.
 
-- `--cache-dir`: cache local do snapshot Hugging Face pinado;
-- `--model-artifact-dir`: artefato local absoluto compatível com o contrato v1;
-- `--output-root`: raiz que conterá `datasets/` e `runs/`;
-- `--run-id`: identificador seguro sem separadores de caminho.
-
-O terminal publica apenas progresso, contagens, métricas agregadas, hashes e o
-destino. Nomes, textos, tokens, valores protegidos, entidades, deltas e pesos não
-são impressos.
+B0 é compartilhado. Na rodada 1, F0 e F1 partem do mesmo baseline. Da rodada 2
+em diante, cada trajetória parte do próprio estado final anterior; dados,
+pesos, seeds, ordem e agenda continuam pareados, mas os estados globais não
+precisam coincidir.
 
 ## Execução Slurm em uma L40S
 
-O launcher `scripts/run_pilot_l40s.sbatch` é a interface versionada para o
-cluster. Ele deve ser submetido a partir da raiz do repositório, usa
-`.venv/bin/python` e fixa uma task, uma L40S, oito CPUs, 64 GiB de RAM e 24 horas.
-Duas GPUs não são usadas por um mesmo processo.
-
-O primeiro argumento é obrigatório e aceita somente:
-
-- `preflight`: executa a CLI com `--preflight-only` e não publica datasets,
-  checkpoints nem auditorias;
-- `start`: acrescenta `--fresh` e recusa o diretório da execução desse `run_id`
-  quando ele já existe;
-- `resume`: exige o diretório do mesmo `run_id`, não usa `--fresh`, revalida os
-  artefatos e continua do último checkpoint confirmado.
-
-Execute somente um modo conforme a etapa. Para validar sem escrever, submeta:
+Use o launcher promovido, sempre da raiz limpa do repositório:
 
 ```bash
-sbatch scripts/run_pilot_l40s.sbatch preflight
+sbatch scripts/run_pilot_lr_000030_l40s.sbatch preflight
+sbatch scripts/run_pilot_lr_000030_l40s.sbatch start
+sbatch scripts/run_pilot_lr_000030_l40s.sbatch resume
 ```
 
-Depois da revisão explícita do preflight, inicie o piloto com:
+- `preflight` acrescenta `--preflight-only` e não publica artefatos científicos;
+- `start` acrescenta `--fresh` e recusa o run existente;
+- `resume` exige o mesmo run existente e nunca usa `--fresh`.
 
-```bash
-sbatch scripts/run_pilot_l40s.sbatch start
-```
+O launcher reserva uma L40S, oito CPUs, 64 GiB e 24 horas, usa
+`.venv/bin/python`, exporta o ambiente offline e determinístico, chama o processo
+por `srun` e propaga seu código de saída. A dependência `singleton` serializa
+jobs com o mesmo nome, mas nunca devem ser submetidos dois jobs para o mesmo
+`run_id`.
 
-Somente para uma execução oficial já existente, retome com:
+O launcher anterior `scripts/run_pilot_l40s.sbatch`, `main-v1.yaml`,
+`main-v2.yaml` e seus runs permanecem históricos e não são retomados pela v3.
+Não há requeue automático. Após `TIMEOUT`, verifique `sacct` e os logs e submeta
+manualmente `resume`.
 
-```bash
-sbatch scripts/run_pilot_l40s.sbatch resume
-```
+## Transação de B0 e das rodadas
 
-O launcher fixa a configuração `configs/main-v2.yaml`, o cache
-`artifacts/huggingface`, a raiz `outputs/` e o `run_id`
-`pilot-greedy-seed-101-k01-v2`. Antes de chamar `srun`, ele exporta
-`CUBLAS_WORKSPACE_CONFIG=:4096:8`, `HF_HUB_OFFLINE=1`,
-`TRANSFORMERS_OFFLINE=1`, `TOKENIZERS_PARALLELISM=false` e
-`PYTHONUNBUFFERED=1`. Ele recusa execução fora do Slurm, sem GPU, com Python
-diferente de 3.12, dependências quebradas ou alterações rastreadas no worktree.
+B0 só é confirmado depois das quatro auditorias, da utilidade e do marcador
+compatível. Cada rodada federada só é confirmada depois de:
 
-A diretiva de dependência `singleton` serializa jobs com o mesmo nome. Ela não
-substitui a identidade científica: nunca devem existir duas submissões para o
-mesmo `run_id`. Os logs `slurm-%x-%j.out` e `slurm-%x-%j.err` são gravados na
-raiz do repositório, contêm apenas contexto técnico e progresso seguro e ficam
-fora do Git.
+1. treinamento dos 11 clientes e aplicação atômica do FedAvg;
+2. auditorias greedy e verificação do fingerprint;
+3. avaliação de utilidade, somente na rodada 20;
+4. publicação do checkpoint `safetensors`;
+5. commit da rodada e atualização do estado retomável.
 
-Não há requeue automático. Se o Slurm encerrar o job com `TIMEOUT`, consulte o
-estado e os logs antes de retomar:
-
-```bash
-sacct -j <job_id> --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS
-sbatch scripts/run_pilot_l40s.sbatch resume
-```
-
-O modo `resume` reaproveita o último checkpoint confirmado. Resíduos de uma
-rodada não confirmada são revalidados e, se não puderem concluir a transação,
-essa rodada é reproduzida deterministicamente.
-
-## Transação de uma rodada
-
-Cada trajetória materializa apenas a sua apresentação auxiliar da rodada atual.
-Os 11 clientes começam do mesmo snapshot global, e cada delta é consumido
-imediatamente pelo acumulador FedAvg. Uma rodada só é confirmada depois de:
-
-1. treinamento local e aplicação atômica do FedAvg;
-2. auditoria e validação do fingerprint do modelo;
-3. publicação atômica do checkpoint `safetensors`;
-4. publicação do commit da rodada e atualização de `state.json`.
-
-Na F1, o resultado FedAvg e as auditorias também são comparados com a mesma
-rodada F0 antes da confirmação. A rodada 1 deve começar do baseline compartilhado;
-nas demais, o estado inicial de cada braço deve ser exatamente o estado final da
-rodada anterior daquele cenário. Essa continuidade é revalidada ao carregar um
-prefixo confirmado e ao recuperar um checkpoint. Uma falha anterior ao commit
-restaura o snapshot da rodada. Um checkpoint completo deixado antes do commit
-pode concluir a transação após revalidação; qualquer candidato incompatível é
-descartado e a rodada é reproduzida. Auditorias já concluídas só são reutilizadas
-quando o fingerprint do modelo e todos os metadados esperados coincidem.
-
-Os checkpoints permanentes são as rodadas 1, 10 e 20. Nas demais rodadas existe
-somente um checkpoint móvel de retomada. Cada checkpoint contém o modelo BF16 em
-`model.safetensors`, resultado seguro da rodada, metadados/hashes e estados RNG
-de CPU e do dispositivo. Ele não contém otimizadores, deltas, tokens, textos ou
-registros protegidos.
+Resultados completos compatíveis são relidos. Resíduos parciais não são
+promovidos; a etapa incompleta é reproduzida. Os checkpoints permanentes ficam
+nas rodadas 1, 10 e 20, com um único checkpoint móvel nas demais. Eles não
+contêm otimizador, deltas, tokens, textos ou registros protegidos.
 
 ## Árvore de saída
 
 ```text
 outputs/
-├── datasets/pilot-greedy-seed-101-k01-v2-dataset-v4/clients/
+├── datasets/pilot-greedy-lr-000030-seed-101-k01-v3-dataset-v4/clients/
 │   ├── victim/<client_id>/conversations.jsonl
 │   └── auxiliary/F0-F1/<presentation>/round-N/conversations.jsonl
-└── runs/pilot-greedy-seed-101-k01-v2/
+└── runs/pilot-greedy-lr-000030-seed-101-k01-v3/
     ├── run_manifest.json
     ├── baseline/
     │   ├── completed.json
     │   └── evaluator/
+    │       ├── private/
+    │       ├── summaries/
+    │       └── utility/summary.json
     ├── trajectories/
     │   ├── F0-k01/
-    │   │   ├── rounds/
-    │   │   ├── checkpoints/
-    │   │   └── evaluator/
     │   └── F1-k01/
-    │       ├── rounds/
-    │       ├── checkpoints/
-    │       └── evaluator/
     ├── paired/round-N.json
     └── completed.json
 ```
 
-Os JSONL de conversas são restritos ao cliente e permanecem fora do Git. As
-gerações e o registro correto ficam somente em `evaluator/private/`; os resumos
-seguros ficam em `evaluator/summaries/`. Checkpoints, caches, datasets e toda a
-árvore de execução também permanecem fora do controle de versão.
-
-O piloto e seus checkpoints usam `pilot-execution/v2`,
-`federated-trajectory/v2` e `federated-checkpoint/v2`. A execução sampling v1 em
-`outputs/runs/pilot-seed-101-k01/` permanece somente como histórico e nunca é
-retomada ou combinada com o piloto greedy.
+Os contratos ativos são `pilot-execution/v3`, `federated-trajectory/v3` e
+`federated-checkpoint/v3`. Datasets, pesos, auditorias e toda a árvore `outputs/`
+permanecem fora do Git.
 
 ## Aceitação científica
 
-Concluir o comando cria um marcador revisável, mas não congela automaticamente
-a receita da campanha principal. Antes de promover a configuração, é obrigatória
-a revisão humana das métricas, estabilidade, custo, memória, saídas privadas e
-limitações do piloto.
+O marcador final reúne extração e utilidade, mas não congela automaticamente a
+receita. A promoção para a campanha principal exige revisão humana conjunta de
+privacidade, utilidade, estabilidade, custo, memória e limitações desta única
+seed de desenvolvimento.

@@ -501,7 +501,7 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                 encoding="utf-8",
             )
             pilot_spec = load_pilot_execution_spec_from_config(
-                Path("configs/main-v2.yaml")
+                Path("configs/main-v3.yaml")
             )
             with self.assertRaises(PilotExecutionError):
                 load_completed_calibration_gate(Path(directory), pilot_spec)
@@ -561,7 +561,7 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
             v2_payload = {
                 "schema_version": "memorization-calibration/v2",
                 "experiment_seed": 101,
-                "run_id": pilot_spec.calibration_run_id,
+                "run_id": "memorization-calibration-greedy-seed-101-v2",
                 "dataset_id": calibration_spec.dataset_id,
                 "baseline_model_sha256": first.baseline_model_sha256,
                 "arms": v2_arms,
@@ -586,11 +586,15 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
             v2_payload["result_sha256"] = hashlib.sha256(
                 b"memorization-calibration-result/v2\0" + v2_canonical
             ).hexdigest()
-            v2_run = Path(directory) / "runs" / pilot_spec.calibration_run_id
+            v2_run = (
+                Path(directory)
+                / "runs"
+                / "memorization-calibration-greedy-seed-101-v2"
+            )
             v2_run.mkdir(mode=0o700)
             v2_manifest = {
                 "schema_version": "memorization-calibration/v2",
-                "run_id": pilot_spec.calibration_run_id,
+                "run_id": "memorization-calibration-greedy-seed-101-v2",
                 "experiment_seed": 101,
                 "dataset_id": calibration_spec.dataset_id,
                 "client_id": calibration_spec.client_id,
@@ -621,9 +625,12 @@ class CanaryTrainingAndCheckpointTests(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-            gate = load_completed_calibration_gate(Path(directory), pilot_spec)
-            self.assertEqual(gate.result_sha256, v2_payload["result_sha256"])
-            self.assertEqual(gate.audit_model_sha256[-1], successful_v2["model_state_sha256"])
+            legacy_spec = dataclasses.replace(
+                pilot_spec,
+                calibration_run_id="memorization-calibration-greedy-seed-101-v2",
+            )
+            with self.assertRaises(PilotExecutionError):
+                load_completed_calibration_gate(Path(directory), legacy_spec)
 
     def test_interrupted_arm_restarts_from_baseline_without_repeating_confirmed_arm(self):
         calibration_spec = load_memorization_calibration_spec_from_config(
