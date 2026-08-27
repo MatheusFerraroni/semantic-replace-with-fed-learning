@@ -12,18 +12,22 @@ perfis e conversas sintéticas, da tokenização, do treinamento local não priv
 do FedAvg, da auditoria central de extração, do orquestrador retomável do piloto
 B0/F0/F1 de 20 rodadas, da calibração positiva vulnerável com canários completos
 e da avaliação sintética de utilidade. A investigação v4 promoveu `3e-5` para o
-novo piloto v3; a campanha principal e as defesas continuam pendentes.
+novo piloto v3. A calibração federada de exposição local 1×/2×/4× está
+implementada e aguarda execução na L40S; a campanha principal e as defesas
+continuam pendentes.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
 - [Configuração do piloto promovido com `3e-5`](configs/main-v3.yaml)
 - [Configuração greedy anterior (histórica)](configs/main-v2.yaml)
 - [Configuração da investigação greedy de learning rate](configs/memorization-calibration-v4.yaml)
+- [Configuração da calibração federada de exposição](configs/federated-memorization-calibration-v1.yaml)
 - [Configuração sampling v1 (histórica, somente leitura)](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
 - [Orquestrador retomável do piloto](docs/pilot-orchestrator.md)
 - [Calibração positiva de memorização](docs/memorization-calibration.md)
+- [Calibração federada de exposição local](docs/federated-memorization-calibration.md)
 
 | Componente | Estado executável |
 | --- | --- |
@@ -35,6 +39,7 @@ novo piloto v3; a campanha principal e as defesas continuam pendentes.
 | FedAvg e execução de uma rodada F0/F1 | Implementado |
 | Orquestração retomável do piloto B0/F0/F1 | Implementado |
 | Controle positivo vulnerável com canários completos | Implementado |
+| Calibração federada de exposição local 1×/2×/4× | Implementado; execução pendente |
 | DP-SGD e substituições semânticas | Não implementado |
 | Auditoria central de extração B0/F0/F1 | Implementado |
 | Utilidade sintética held-out em B0/F0-r20/F1-r20 | Implementado |
@@ -455,6 +460,44 @@ braços, checkpoints e auditorias já publicados. A execução oficial terminou 
 `calibrated=true`, baseline reprovado e `lr-000030` como primeiro braço aprovado;
 esse resultado foi integrado estritamente ao piloto v3. Consulte
 [`docs/memorization-calibration.md`](docs/memorization-calibration.md).
+
+## Calibrar a exposição local das vítimas no FedAvg
+
+A execução `federated-memorization-calibration/v1` mede se aumentar somente o
+treinamento local das vítimas torna a reprodução federada mensurável. Ela cria
+três trajetórias F0 independentes, todas partindo do Tucano 2 pinado, com
+multiplicadores 1×, 2× e 4×. O auxiliar benigno permanece com uma passagem,
+25 passos e peso `1/11`; as dez vítimas mantêm peso `1/11` cada.
+
+Somente B0 e o checkpoint final de cada braço são auditados, sempre com os 200
+participantes e inferência greedy. O total fixado é de 146.000 apresentações,
+36.500 passos, 7.204 gerações de extração e 2.000 avaliações de conversa de
+utilidade. O braço 1× precisa reproduzir o modelo, a auditoria final e a
+utilidade F0-r20 do piloto v3 concluído antes da interpretação dos braços 2×/4×.
+
+Valide primeiro sem escrever:
+
+```bash
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+python -m federated_leakage.run_federated_memorization_calibration \
+  --config configs/federated-memorization-calibration-v1.yaml \
+  --device cuda \
+  --preflight-only
+```
+
+No Slurm, use um único modo por submissão:
+
+```bash
+sbatch scripts/run_federated_memorization_calibration_l40s.sbatch preflight
+sbatch scripts/run_federated_memorization_calibration_l40s.sbatch start
+sbatch scripts/run_federated_memorization_calibration_l40s.sbatch resume
+```
+
+`start` exige que o `run_id` oficial ainda não exista. `resume` revalida o
+checkpoint confirmado e repete somente a rodada incompleta, pois o AdamW local
+não é persistido. Consulte
+[`docs/federated-memorization-calibration.md`](docs/federated-memorization-calibration.md).
 
 ## Gerar um dataset para inspeção
 

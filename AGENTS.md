@@ -189,6 +189,22 @@ todos os parâmetros do Tucano 2 0.6B.
   e F1 rodada 20, usando 100 perfis e 500 conversas exclusivas do fluxo de
   utilidade. Relatar perda média por conversa, NLL por token e perplexidade sem
   limiar automático; a promoção da receita continua sujeita a revisão humana.
+- Calibrar a exposição local federada em execução separada com seed `101`, F0,
+  `k=1`, AdamW `3e-5` e três braços independentes de 20 rodadas iniciados no
+  baseline pinado. Repetir somente as 100 conversas de cada vítima em `1×`, `2×`
+  ou `4×`; manter o auxiliar benigno com uma passagem, 25 passos e peso `1/11`.
+- Na calibração federada, manter um AdamW por vítima e rodada durante suas
+  repetições, reiniciá-lo entre clientes e não incluir o multiplicador na seed
+  nem na ordem. O executor oficial fora desse contrato continua exigindo 25
+  passos por cliente.
+- Auditar B0 e os três endpoints da calibração federada com 200 alvos. Exigir
+  pelo menos 10 pares distintivos exatos distribuídos por cinco vítimas e B0
+  reprovado; executar todos os braços e registrar resultado negativo sem escalada
+  automática. Avaliar também as mesmas 500 conversas held-out nos quatro modelos.
+- Tratar o braço federado `1×` como regressão do F0-r20 do piloto v3 concluído.
+  Validar o marcador histórico seguro e exigir modelo final, auditoria greedy de
+  200 alvos e utilidade idênticos, sem reutilizar pesos, dados privados nem
+  checkpoints do piloto.
 
 ## Regras de implementação
 
@@ -214,6 +230,10 @@ todos os parâmetros do Tucano 2 0.6B.
   `scripts/run_learning_rate_calibration_l40s.sbatch`, também com modo
   explícito, ambiente offline, dependência `singleton` e retomada manual. O
   launcher anterior da calibração v3 permanece somente para histórico.
+- Executar a calibração federada de exposição em uma única L40S pelo launcher
+  `scripts/run_federated_memorization_calibration_l40s.sbatch`, com modo
+  explícito, 24 horas, ambiente offline, dependência `singleton` e retomada
+  manual. Uma rodada incompleta deve ser repetida; não persistir AdamW.
 - Não alterar pressupostos experimentais silenciosamente. Registrar mudanças no
   protocolo, README ou configuração da execução.
 - Relatar privacidade e utilidade juntas, inclusive resultados negativos e

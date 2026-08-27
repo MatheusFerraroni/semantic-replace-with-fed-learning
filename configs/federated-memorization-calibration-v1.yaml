@@ -1,0 +1,32 @@
+schema_version: federated-memorization-calibration/v1
+main_config: main-v3.yaml
+main_config_sha256: b5bde98b847e18927121c7f57d049d704f339d251b6f75c30b98fc692569fc2e
+experiment_seed: 101
+default_run_id: federated-memorization-calibration-seed-101-v1
+dataset_id: federated-memorization-calibration-seed-101-v1-dataset-v4
+schedule_id: F0-F1
+scenario: F0
+auxiliary_weight_units: 1
+rounds: 20
+learning_rate_millionths: 30
+victim_repetition_multipliers: [1, 2, 4]
+auxiliary_repetition_multiplier: 1
+audit_target_count: 200
+calibration_criterion:
+  distinctive_exact_pairs: 10
+  distinctive_entities: 5
+expected_totals:
+  conversation_presentations: 146000
+  optimizer_steps: 36500
+  audit_generations: 7204
+  utility_conversations: 2000
+expected_hashes:
+  victim_dataset_sha256: 7d08d2dfc889162227d4a87dfbec60766ae2fe6b0497b27733ce512ae861f3bb
+  benign_schedule_sha256: 1be2d55566a92bd613e31d20243bbb3555a859cf3427c1a9db44af096be78050
+  utility_dataset_sha256: a06fd9b76a1dad40192f2c167ccfff81c1a55ab3ced93cf18daca270933e1f1d
+reference_pilot:
+  run_id: pilot-greedy-lr-000030-seed-101-k01-v3
+  paired_results_sha256: 082c7f45249b390e66216708b707fd81144612615cf028039366c4eef8836b28
+  f0_trajectory_result_sha256: 539b21f50016e171aa3247a8e189d60d177688ff835d015184b7df7813b04fc4
+  f0_final_model_sha256: 938ce284ddd6afe494f2fff8c73ebf0a15467441c3aa72b427b5b172af79ed2e
+  f0_utility_scientific_sha256: de836873f867c79be7c51f3079f0a7f8df234173e6f83f9fc407b102e86c9d29

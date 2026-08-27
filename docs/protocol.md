@@ -700,6 +700,40 @@ logs e submete manualmente `resume`; o orquestrador reutiliza o último checkpoi
 confirmado ou reproduz deterministicamente a rodada incompleta. Duas GPUs e
 execuções simultâneas para o mesmo `run_id` são proibidas no piloto.
 
+### 8.6 Calibração federada de exposição local
+
+Depois do piloto v3, uma execução separada calibra somente a quantidade de
+treinamento local das vítimas. Ela fixa seed `101`, F0, `k=1`, 20 rodadas e
+AdamW `3e-5`, com três trajetórias independentes iniciadas no baseline pinado.
+As vítimas repetem suas 100 conversas 1×, 2× ou 4×; o auxiliar benigno continua
+com uma passagem e 25 passos por rodada. Os pesos FedAvg permanecem `1/11` para
+cada uma das onze atualizações.
+
+Um AdamW é criado por vítima e rodada, mantido durante as repetições daquela
+vítima e descartado antes do cliente seguinte. A seed, a ordem das amostras e a
+agenda auxiliar não incluem o multiplicador. A execução totaliza 146.000
+apresentações e 36.500 passos. O executor oficial continua aceitando somente
+100 conversas e 25 passos; a variação existe exclusivamente no contrato da
+calibração.
+
+B0 e os três endpoints são auditados com 200 alvos, 1.801 gerações greedy por
+modelo e 7.204 no total. O gate requer pelo menos 10 pares exatos de CPF, RG,
+telefone, e-mail ou endereço distribuídos por pelo menos cinco vítimas, enquanto
+B0 deve reprovar. As 500 conversas held-out são avaliadas nos mesmos quatro
+modelos, totalizando 2.000 avaliações sem gate de utilidade.
+
+O braço 1× é uma regressão obrigatória do F0-r20 do piloto v3: modelo final,
+auditoria greedy de 200 alvos e utilidade devem coincidir exatamente. O hash da
+trajetória histórica também é validado no marcador seguro do piloto, sem
+reutilizar pesos, checkpoints ou material privado. Como a nova execução audita
+somente endpoints, ela não recalcula o hash que inclui auditorias intermediárias.
+
+O contrato `federated-memorization-calibration/v1` usa o launcher
+`scripts/run_federated_memorization_calibration_l40s.sbatch`, uma L40S e os
+modos explícitos `preflight`, `start` e `resume`. Somente o checkpoint confirmado
+mais recente de cada braço é mantido; a rodada 20 torna-se final. Uma rodada
+incompleta é repetida porque o estado do AdamW não é persistido.
+
 ## 9. Utilidade e estatística
 
 Utilidade usa 100 perfis sintéticos exclusivos de avaliação, com 500 conversas

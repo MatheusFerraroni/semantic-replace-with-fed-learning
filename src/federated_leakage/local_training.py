@@ -495,7 +495,121 @@ def train_local_client(
     return result
 
 
+def train_local_client_with_repetitions_for_calibration(
+    samples: Sequence[TokenizedConversation],
+    model_bundle: LoadedModelBundle,
+    spec: LocalTrainingSpec,
+    *,
+    seed: int,
+    round_id: int,
+    initial_snapshot: ModelParameterSnapshot,
+    repetition_multiplier: int,
+) -> LocalTrainingResult:
+    """Repete apenas uma vítima com AdamW contínuo para a calibração isolada."""
+
+    if type(repetition_multiplier) is not int or repetition_multiplier not in {2, 4}:
+        raise LocalTrainingError("multiplicador local da calibração é inválido")
+    if not isinstance(model_bundle, LoadedModelBundle):
+        raise LocalTrainingError("bundle de modelo da calibração é incompatível")
+    try:
+        validate_cuda_reproducibility_environment(model_bundle.provenance.device)
+    except ReproducibilityEnvironmentError as error:
+        raise LocalTrainingError(str(error)) from error
+    validated_spec = validate_local_training_spec(spec)
+    resolved, client_id = _validate_samples(
+        samples, validated_spec, "victim", round_id
+    )
+    named = _validate_snapshot(model_bundle, initial_snapshot)
+    parameters = tuple(parameter for _, parameter in named)
+    model = model_bundle.model
+    model_config = getattr(model, "config", None)
+    if getattr(model_config, "use_cache", None) is not False:
+        raise LocalTrainingError("cache causal do modelo local não está desativado")
+    if getattr(model_config, "_attn_implementation", None) != "eager":
+        raise LocalTrainingError("implementação de atenção do modelo não é eager")
+    torch, _ = _load_torch()
+    torch_seed, seed_hash = _training_seed(seed, client_id, round_id)
+    _configure_determinism(torch, torch_seed, parameters[0].device.type)
+    optimizer = _create_adamw_optimizer(torch, parameters, validated_spec)
+
+    previous_training_mode = bool(getattr(model, "training", False))
+    step_losses: list[float] = []
+    gradient_norms: list[float] = []
+    try:
+        model.train()
+        for _ in range(repetition_multiplier):
+            for start in range(0, len(resolved), validated_spec.logical_batch_size):
+                loss, gradient_norm = _run_logical_batch(
+                    model,
+                    resolved[start : start + validated_spec.logical_batch_size],
+                    optimizer,
+                    parameters,
+                    parameters[0].device,
+                    validated_spec.logical_batch_size,
+                )
+                step_losses.append(loss)
+                gradient_norms.append(gradient_norm)
+        if len(step_losses) != repetition_multiplier * validated_spec.optimizer_steps:
+            raise LocalTrainingError("quantidade de passos repetidos diverge")
+        _validate_model_parameters(model_bundle, require_finite=True)
+    except Exception as error:
+        try:
+            model.zero_grad(set_to_none=True)
+            restore_model_parameter_snapshot(model_bundle, initial_snapshot)
+            model.train(previous_training_mode)
+        except Exception as restore_error:
+            raise LocalTrainingError(
+                "treinamento repetido falhou e o snapshot não pôde ser restaurado"
+            ) from restore_error
+        if isinstance(error, LocalTrainingError):
+            raise
+        raise LocalTrainingError("falha inesperada no treinamento repetido") from error
+
+    digest = hashlib.sha256()
+    digest.update(b"federated-exposure-local-order/v1\0")
+    digest.update(client_id.encode("ascii"))
+    digest.update(b"\0")
+    digest.update(str(round_id).encode("ascii"))
+    for _ in range(repetition_multiplier):
+        for sample in resolved:
+            digest.update(b"\0")
+            digest.update(str(sample.sample_index).encode("ascii"))
+    model.zero_grad(set_to_none=True)
+    result = LocalTrainingResult(
+        client_id=client_id,
+        role="victim",
+        round_id=round_id,
+        conversation_count=len(resolved),
+        optimizer_steps=len(step_losses),
+        supervised_token_count=repetition_multiplier
+        * sum(sample.supervised_token_count for sample in resolved),
+        mean_loss=sum(step_losses) / len(step_losses),
+        first_step_loss=step_losses[0],
+        last_step_loss=step_losses[-1],
+        mean_gradient_norm=sum(gradient_norms) / len(gradient_norms),
+        max_gradient_norm=max(gradient_norms),
+        sample_order_sha256=digest.hexdigest(),
+        training_seed_sha256=seed_hash,
+        model_provenance=model_bundle.provenance,
+    )
+    if any(
+        not math.isfinite(value)
+        for value in (
+            result.mean_loss,
+            result.first_step_loss,
+            result.last_step_loss,
+            result.mean_gradient_norm,
+            result.max_gradient_norm,
+        )
+    ):
+        restore_model_parameter_snapshot(model_bundle, initial_snapshot)
+        raise LocalTrainingError("métricas repetidas não são finitas")
+    model.train(previous_training_mode)
+    return result
+
+
 __all__ = [
     "mean_conversation_causal_loss",
     "train_local_client",
+    "train_local_client_with_repetitions_for_calibration",
 ]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Tuple
 
@@ -163,6 +163,7 @@ class FedAvgAccumulator:
         model_provenance: ModelProvenance,
         *,
         round_id: int,
+        expected_optimizer_steps_by_client: Mapping[str, int] | None = None,
     ) -> None:
         self._spec = validate_fedavg_spec(spec)
         self._snapshot = _validate_snapshot_contract(snapshot)
@@ -197,6 +198,23 @@ class FedAvgAccumulator:
         )
         if self._weights != expected_weights:
             raise FedAvgError("ordem ou valores dos pesos são incompatíveis")
+
+        expected_client_ids = tuple(weight.client_id for weight in self._weights)
+        if expected_optimizer_steps_by_client is None:
+            self._expected_optimizer_steps = {
+                client_id: 25 for client_id in expected_client_ids
+            }
+        else:
+            candidate = dict(expected_optimizer_steps_by_client)
+            if (
+                tuple(candidate) != expected_client_ids
+                or any(
+                    type(value) is not int or value <= 0
+                    for value in candidate.values()
+                )
+            ):
+                raise FedAvgError("contrato de passos locais do acumulador é inválido")
+            self._expected_optimizer_steps = candidate
 
         self._round_id = round_id
         self._model_provenance = model_provenance
@@ -247,7 +265,8 @@ class FedAvgAccumulator:
             or result.round_id != self._round_id
             or result.model_provenance != self._model_provenance
             or result.conversation_count != 100
-            or result.optimizer_steps != 25
+            or result.optimizer_steps
+            != self._expected_optimizer_steps[weight.client_id]
             or result.supervised_token_count <= 0
             or any(
                 not math.isfinite(value)
