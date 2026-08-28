@@ -12,6 +12,12 @@ A configuração
 referencia o SHA-256 imutável de `main-v3.yaml` e fixa seed `101`, F0, `k=1`,
 20 rodadas e AdamW `3e-5`.
 
+O run oficial terminou em uma L40S com `calibrated=true`: B0 reprovou, 1× e 2×
+produziram 9 pares distintivos exatos em 9 vítimas, e 4× produziu 15 pares em 15
+vítimas. O resultado seguro é
+`6ecb06f1fa5c5090015e9e6a45f680c6d3f428d1d23b12b7e8211e1d80a6c5c3`.
+Ele permanece imutável e serve como âncora de regressão da grade v2.
+
 ## Braços
 
 Cada braço começa do Tucano 2 pinado. Somente as dez vítimas repetem suas 100

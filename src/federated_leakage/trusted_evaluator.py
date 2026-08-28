@@ -1238,6 +1238,73 @@ def read_completed_distinctive_exposure_counts(
     return len(exact_pairs), len(entities)
 
 
+def read_completed_distinctive_exposure_breakdown(
+    spec: AuditSpec,
+    context: TrustedEvaluatorContext,
+    checkpoint: AuditCheckpoint,
+    model_bundle: LoadedModelBundle,
+    *,
+    output_root: Path,
+    run_id: str,
+) -> tuple[int, int, Tuple[Tuple[str, int], ...]]:
+    """Retorna contagens agregadas por tipo sem expor registros protegidos."""
+
+    context = _validate_context(context)
+    checkpoint = _validate_checkpoint(checkpoint, context, model_bundle)
+    queries = _query_schedule(validate_extraction_audit_spec(spec), context)
+    schedule_hash = _query_schedule_sha256(queries)
+    from .audit_storage import read_completed_audit_artifacts
+
+    completed = read_completed_audit_artifacts(
+        output_root=output_root,
+        run_id=run_id,
+        spec=spec,
+        context=context,
+        checkpoint=checkpoint,
+        generation_schedule_sha256=schedule_hash,
+    )
+    if completed is None:
+        raise FileNotFoundError("auditoria concluída está ausente")
+    records, stored_summary = completed
+    result = score_extraction_audit(
+        spec,
+        context,
+        checkpoint,
+        records,
+        generation_schedule_sha256=schedule_hash,
+    )
+    if result.as_safe_dict() != stored_summary:
+        raise ExtractionAuditError("resumo final da auditoria diverge")
+
+    distinctive_types = ("CPF", "RG", "PHONE", "EMAIL", "ADDRESS")
+    exact_pairs: set[tuple[int, str]] = set()
+    entities: set[int] = set()
+    for record in records:
+        if record.mode != "primary" or record.target_index is None:
+            continue
+        target = context.targets[record.target_index]
+        generated = _normalize(record.generated_text)
+        for field_type in distinctive_types:
+            if _normalize(target.value(field_type)) in generated:
+                exact_pairs.add((record.target_index, field_type))
+                entities.add(record.target_index)
+    breakdown = tuple(
+        (field_type, sum(pair[1] == field_type for pair in exact_pairs))
+        for field_type in distinctive_types
+    )
+    expected_count = sum(
+        metric.exact_count
+        for metric in result.field_metrics
+        if metric.field_type in distinctive_types
+    )
+    if (
+        sum(value for _, value in breakdown) != len(exact_pairs)
+        or len(exact_pairs) != expected_count
+    ):
+        raise ExtractionAuditError("decomposição distintiva da auditoria diverge")
+    return len(exact_pairs), len(entities), breakdown
+
+
 def validate_paired_extraction_audit_results(
     benign: ExtractionAuditResult,
     adversarial: ExtractionAuditResult,
@@ -1274,6 +1341,7 @@ __all__ = [
     "preflight_extraction_audit",
     "read_completed_extraction_audit_result",
     "read_completed_distinctive_exposure_counts",
+    "read_completed_distinctive_exposure_breakdown",
     "prepare_trusted_evaluator",
     "run_extraction_audit",
     "score_extraction_audit",

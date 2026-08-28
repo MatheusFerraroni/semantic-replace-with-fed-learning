@@ -12,9 +12,9 @@ perfis e conversas sintéticas, da tokenização, do treinamento local não priv
 do FedAvg, da auditoria central de extração, do orquestrador retomável do piloto
 B0/F0/F1 de 20 rodadas, da calibração positiva vulnerável com canários completos
 e da avaliação sintética de utilidade. A investigação v4 promoveu `3e-5` para o
-novo piloto v3. A calibração federada de exposição local 1×/2×/4× está
-implementada e aguarda execução na L40S; a campanha principal e as defesas
-continuam pendentes.
+novo piloto v3. A calibração federada 1×/2×/4× terminou com o primeiro gate em
+4×. A grade v2 de intensidade com seis braços e duas seeds está implementada;
+a campanha principal e as defesas continuam pendentes.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
@@ -22,12 +22,14 @@ continuam pendentes.
 - [Configuração greedy anterior (histórica)](configs/main-v2.yaml)
 - [Configuração da investigação greedy de learning rate](configs/memorization-calibration-v4.yaml)
 - [Configuração da calibração federada de exposição](configs/federated-memorization-calibration-v1.yaml)
+- [Configuração da grade federada de intensidade](configs/federated-memorization-grid-v2.yaml)
 - [Configuração sampling v1 (histórica, somente leitura)](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
 - [Orquestrador retomável do piloto](docs/pilot-orchestrator.md)
 - [Calibração positiva de memorização](docs/memorization-calibration.md)
 - [Calibração federada de exposição local](docs/federated-memorization-calibration.md)
+- [Grade federada de intensidade](docs/federated-memorization-grid.md)
 
 | Componente | Estado executável |
 | --- | --- |
@@ -39,7 +41,8 @@ continuam pendentes.
 | FedAvg e execução de uma rodada F0/F1 | Implementado |
 | Orquestração retomável do piloto B0/F0/F1 | Implementado |
 | Controle positivo vulnerável com canários completos | Implementado |
-| Calibração federada de exposição local 1×/2×/4× | Implementado; execução pendente |
+| Calibração federada de exposição local 1×/2×/4× | Implementado; concluída com gate em 4× |
+| Grade federada 4×/8×/16×, duas LRs e duas seeds | Implementado; execução pendente |
 | DP-SGD e substituições semânticas | Não implementado |
 | Auditoria central de extração B0/F0/F1 | Implementado |
 | Utilidade sintética held-out em B0/F0-r20/F1-r20 | Implementado |
@@ -498,6 +501,14 @@ sbatch scripts/run_federated_memorization_calibration_l40s.sbatch resume
 checkpoint confirmado e repete somente a rodada incompleta, pois o AdamW local
 não é persistido. Consulte
 [`docs/federated-memorization-calibration.md`](docs/federated-memorization-calibration.md).
+
+## Executar a grade federada de intensidade
+
+A grade v2 avalia `4×`, `8×` e `16×` com learning rates das vítimas `3e-5` e
+`1e-4`, separadamente nas seeds `101` e `361506353`. O auxiliar permanece em
+`3e-5`, 25 passos e peso `1/11`. Cada seed é um run retomável independente e os
+dois jobs podem ocupar L40S diferentes em paralelo. Consulte
+[`docs/federated-memorization-grid.md`](docs/federated-memorization-grid.md).
 
 ## Gerar um dataset para inspeção
 

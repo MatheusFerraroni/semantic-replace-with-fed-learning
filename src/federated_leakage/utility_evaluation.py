@@ -34,6 +34,7 @@ HELDOUT_UTILITY_DATASET_SCHEMA_VERSION = "heldout-utility-dataset/v1"
 UTILITY_EVALUATION_SCHEMA_VERSION = "utility-evaluation/v1"
 UTILITY_EVALUATION_RESULT_SCHEMA_VERSION = "utility-evaluation-result/v1"
 UTILITY_CHECKPOINTS = ("B0", "F0-round-020", "F1-round-020")
+UTILITY_EXPERIMENT_SEEDS = (101, 361506353)
 
 
 class UtilityEvaluationError(RuntimeError):
@@ -347,7 +348,8 @@ def validate_utility_evaluation_result(
         or result.scenario not in {"B0", "F0", "F1"}
         or (result.scenario == "B0" and result.round_id != 0)
         or (result.scenario != "B0" and result.round_id != 20)
-        or result.experiment_seed != 101
+        or type(result.experiment_seed) is not int
+        or result.experiment_seed not in UTILITY_EXPERIMENT_SEEDS
         or result.conversation_count != 500
         or result.supervised_token_count <= 0
         or any(not math.isfinite(value) for value in metrics)

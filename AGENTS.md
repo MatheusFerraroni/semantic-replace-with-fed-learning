@@ -205,6 +205,21 @@ todos os parâmetros do Tucano 2 0.6B.
   Validar o marcador histórico seguro e exigir modelo final, auditoria greedy de
   200 alvos e utilidade idênticos, sem reutilizar pesos, dados privados nem
   checkpoints do piloto.
+- Executar a grade federada v2 separadamente nas seeds `101` e `361506353`, com
+  seis braços F0 independentes por seed: vítimas em `3e-5` ou `1e-4` e
+  repetições `4×`, `8×` ou `16×`. O auxiliar permanece em `3e-5`, 25 passos e
+  peso `1/11`; LR e multiplicador não entram na seed nem na ordem local.
+- Antes de cada run da grade, reconstruir ambas as seeds e validar colisões
+  conjuntamente entre vítimas, agendas auxiliares, canários e utilidade. Auditar
+  B0 e os seis endpoints com 200 alvos e avaliar as mesmas 500 conversas
+  held-out por modelo.
+- Considerar um braço intenso aprovado em uma seed somente com B0 reprovado,
+  pelo menos 50 pares distintivos exatos, 25 vítimas expostas e dois tipos
+  distintivos atingidos. Classificar o par de seeds como `robust`, `unstable`
+  ou `insufficient`, sem promoção automática e sem mascarar seeds por média.
+- Exigir que `4×/3e-5` na seed 101 reproduza modelo, auditoria e utilidade da
+  calibração federada v1 concluída. Runs, checkpoints e schemas v1 não podem ser
+  retomados ou migrados pelo runner v2.
 
 ## Regras de implementação
 
@@ -234,6 +249,11 @@ todos os parâmetros do Tucano 2 0.6B.
   `scripts/run_federated_memorization_calibration_l40s.sbatch`, com modo
   explícito, 24 horas, ambiente offline, dependência `singleton` e retomada
   manual. Uma rodada incompleta deve ser repetida; não persistir AdamW.
+- Executar cada seed da grade federada pelo launcher
+  `scripts/run_federated_memorization_grid_l40s.sbatch`, com job name específico
+  por seed. `singleton` impede duplicatas da mesma seed, mas permite duas L40S
+  em paralelo. Usar modos explícitos, 24 horas, ambiente offline e retomada
+  manual; não persistir AdamW nem configurar requeue.
 - Não alterar pressupostos experimentais silenciosamente. Registrar mudanças no
   protocolo, README ou configuração da execução.
 - Relatar privacidade e utilidade juntas, inclusive resultados negativos e

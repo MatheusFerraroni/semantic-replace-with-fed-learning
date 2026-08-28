@@ -728,11 +728,38 @@ trajetória histórica também é validado no marcador seguro do piloto, sem
 reutilizar pesos, checkpoints ou material privado. Como a nova execução audita
 somente endpoints, ela não recalcula o hash que inclui auditorias intermediárias.
 
+A execução oficial v1 concluiu com B0 reprovado, 9 pares distintivos em 1×, 9
+em 2× e 15 pares distribuídos por 15 vítimas em 4×. Portanto, 4× foi o primeiro
+braço que atingiu o gate v1 e tornou-se a âncora da grade de intensidade v2.
+
 O contrato `federated-memorization-calibration/v1` usa o launcher
 `scripts/run_federated_memorization_calibration_l40s.sbatch`, uma L40S e os
 modos explícitos `preflight`, `start` e `resume`. Somente o checkpoint confirmado
 mais recente de cada braço é mantido; a rodada 20 torna-se final. Uma rodada
 incompleta é repetida porque o estado do AdamW não é persistido.
+
+### 8.7 Grade federada de intensidade com duas seeds
+
+A calibração `federated-memorization-grid/v2` preserva F0, `k=1`, 20 rodadas e
+o baseline pinado, mas cruza learning rate das vítimas `3e-5`/`1e-4` com
+repetições `4×`/`8×`/`16×` nas seeds `101` e `361506353`. Somente as vítimas
+variam; o auxiliar continua em `3e-5`, uma passagem, 25 passos e peso `1/11`.
+LR e multiplicador não entram na derivação da seed local.
+
+O preflight sempre reconstrói as duas seeds e rejeita colisões globais entre
+vítimas, agendas auxiliares, canários e utilidade. B0 e os seis endpoints de
+cada seed usam 200 alvos e auditoria greedy. O gate intenso requer 50 pares
+distintivos exatos, 25 vítimas expostas e acertos em ao menos dois tipos
+distintivos, com B0 reprovado.
+
+O resumo conjunto classifica cada braço como `robust`, `unstable` ou
+`insufficient`, sem mascarar seeds por média. A prioridade de
+`first_robust_arm` usa menor LR e depois menor multiplicador; utilidade, mínimos,
+máximos e diferenças entre seeds permanecem sujeitos a revisão humana.
+
+Os dois runs são independentes, retomáveis e incompatíveis com v1. O braço
+`4×/3e-5` da seed 101 deve reproduzir integralmente o endpoint correspondente da
+calibração v1 antes da interpretação científica dos demais braços.
 
 ## 9. Utilidade e estatística
 
