@@ -29,7 +29,7 @@ SUBSTITUTED_VICTIM_ROUND_SCHEMA_VERSION = "substituted-victim-client-round/v1"
 PREPARED_SUBSTITUTED_INPUTS_SCHEMA_VERSION = (
     "prepared-substituted-victim-training-inputs/v1"
 )
-REPLACEMENT_SCHEDULE_VERSION = "rotating-profile/v1"
+REPLACEMENT_SCHEDULE_VERSION = "rotating-profile/v3"
 REPLACEMENT_ROUNDS = 20
 _PROFILES_PER_ROUND = 200
 _MAX_CANDIDATE_ATTEMPTS = 256

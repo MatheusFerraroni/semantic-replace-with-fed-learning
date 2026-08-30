@@ -1,6 +1,6 @@
 schema_version: semantic-substitution-pilot/v1
 main_config: main-v4.yaml
-main_config_sha256: f30b700f195434d8f824f95814886e5d9df970626e6704ddf78dd9cfec64fea8
+main_config_sha256: dcbe731f2b5cfb21a9eb71ba25d424cb2ffdc58012298488113c8fcdd06cf74f
 experiment_seeds: [101, 361506353]
 default_run_ids:
   "101": semantic-substitution-upstream-seed-101-v1

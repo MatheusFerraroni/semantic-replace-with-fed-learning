@@ -13,9 +13,12 @@ auxiliar não recebe a defesa, e o servidor recebe apenas deltas para FedAvg.
 
 ## Substituição por rodada
 
-O gerador deriva um perfil substituto de `(seed, client_id, entity_id,
-round_id)`. Cenário, `k`, modelo e estado do treinamento não entram na
-derivação. Portanto, F4 e F5 reconstroem a mesma agenda sem compartilhar mapas.
+O gerador usa a agenda versionada `rotating-profile/v3` e deriva um perfil
+substituto de `(seed, client_id, entity_id, round_id)`. Cenário, `k`, modelo e
+estado do treinamento não entram na derivação. Portanto, F4 e F5 reconstroem a
+mesma agenda sem compartilhar mapas. A versão v3 reserva um domínio
+determinístico que passou pelo preflight conjunto dos fluxos originais das duas
+seeds; ela não entrega valores globais aos clientes.
 
 - nome, nascimento, CPF, RG, telefone, e-mail, endereço, data e horário são
   substituídos;

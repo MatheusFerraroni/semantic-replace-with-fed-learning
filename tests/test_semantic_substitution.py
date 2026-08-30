@@ -31,6 +31,7 @@ from federated_leakage.semantic_round import (
     validate_paired_semantic_round_results,
 )
 from federated_leakage.semantic_substitution import (
+    REPLACEMENT_SCHEDULE_VERSION,
     RotatingVictimSubstitutionGenerator,
     SemanticSubstitutionError,
     prepare_substituted_victim_training_inputs,
@@ -60,6 +61,7 @@ class SemanticReplacementTests(unittest.TestCase):
         cls.victims = VictimDatasetGenerator(101).generate()
 
     def test_replaces_all_nine_fields_rotates_and_is_deterministic(self):
+        self.assertEqual(REPLACEMENT_SCHEDULE_VERSION, "rotating-profile/v3")
         first = RotatingVictimSubstitutionGenerator(101)
         second = RotatingVictimSubstitutionGenerator(101)
         round_one = first.generate_round(self.victims, 1)

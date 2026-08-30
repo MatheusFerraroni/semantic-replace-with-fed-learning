@@ -475,6 +475,7 @@ dp_sgd:
 semantic_substitution:
   enabled: true
   schema_version: rotating-semantic-replacement/v1
+  schedule_version: rotating-profile/v3
   provider: faker
   provider_version: 40.36.0
   locale: pt_BR

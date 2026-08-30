@@ -491,13 +491,18 @@ DP-SGD.
 
 ### 7.2 Substituição semântica
 
-O piloto `semantic-substitution-pilot/v1` substitui os nove campos, inclusive o
-nome, somente nos dez clientes-vítima e antes da tokenização. Cada substituto
+O piloto `semantic-substitution-pilot/v1` usa a agenda determinística
+`rotating-profile/v3` e substitui os nove campos, inclusive o nome, somente nos
+dez clientes-vítima e antes da tokenização. Cada substituto
 mantém o tipo e o formato do campo. CPFs continuam com checksum inválido. O mapa
 é derivado de `(seed, client_id, entity_id, round_id)`: permanece fixo nas quatro
 conversas e quatro passagens locais da rodada, mas muda na rodada seguinte.
 F4/F5 reconstroem exatamente a mesma agenda; cenário, `k`, modelo e estado do
 treinamento não entram na derivação.
+
+O domínio v3 foi selecionado por preflight conjunto dos fluxos originais das
+duas seeds. A disjunção continua sendo verificada antes de cada execução; nenhum
+cliente recebe os valores globais usados nessa verificação.
 
 Todo campo deve diferir do próprio original e dos substitutos anteriores da
 entidade. Nome, CPF, RG, telefone, e-mail e endereço também não podem coincidir

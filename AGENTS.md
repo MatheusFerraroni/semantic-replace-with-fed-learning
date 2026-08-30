@@ -120,6 +120,9 @@ todos os parâmetros do Tucano 2 0.6B.
   tokenização. Manter o mapa estável nas quatro conversas e quatro passagens
   locais da entidade, renová-lo na rodada federada seguinte e reconstruir a
   mesma agenda em F4/F5 sem compartilhar estado privado.
+- Fixar a agenda de substituição em `rotating-profile/v3`. Alterar seu domínio
+  exige nova versão e novo preflight conjunto; não fornecer valores globais aos
+  clientes para corrigir colisões em tempo de execução.
 - Proibir a reutilização do próprio original e de substitutos anteriores da
   entidade. Para nome, CPF, RG, telefone, e-mail e endereço, proibir também
   coincidência com qualquer original validado. Permitir colisões entre valores
