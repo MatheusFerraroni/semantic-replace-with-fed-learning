@@ -6,6 +6,11 @@ A grade mede quanta exposição federada produz vazamento intenso e se o efeito
 se repete em duas seeds. Ela é uma calibração de desenvolvimento F0, não a
 campanha principal e não inclui defesas.
 
+Os dois runs foram concluídos e a revisão humana selecionou `1e-4 / 4×` como
+condição vulnerável do piloto de substituição semântica. Os artefatos da grade
+permanecem imutáveis e são validados pelo novo runner; seus pesos não são
+reutilizados.
+
 | LR das vítimas | Repetições | Seeds |
 | ---: | ---: | --- |
 | `3e-5` | `4×`, `8×`, `16×` | `101`, `361506353` |

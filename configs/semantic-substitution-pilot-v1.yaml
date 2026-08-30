@@ -1,0 +1,54 @@
+schema_version: semantic-substitution-pilot/v1
+main_config: main-v4.yaml
+main_config_sha256: f30b700f195434d8f824f95814886e5d9df970626e6704ddf78dd9cfec64fea8
+experiment_seeds: [101, 361506353]
+default_run_ids:
+  "101": semantic-substitution-upstream-seed-101-v1
+  "361506353": semantic-substitution-upstream-seed-361506353-v1
+schedule_id: F0-F1
+scenario_order: [F0, F1, F4, F5]
+rounds: 20
+auxiliary_weight_units: 1
+victim_learning_rate_millionths: 100
+victim_repetition_multiplier: 4
+auxiliary_learning_rate_millionths: 30
+auxiliary_repetition_multiplier: 1
+selected_grid_gate:
+  combined_run_id: federated-memorization-grid-v2
+  combined_result_sha256: 4132d3bb053e4edc18fbe2effaf12d2cf9221583c64f2d81b4589f2f099a9244
+  arm_id: victim-lr-000100-repetitions-004
+  result_sha256_by_seed:
+    "101": 33a8924ab218e065e9b94ccf3846639cf81fba6de61b67f6f0917ea855af9fca
+    "361506353": 09e8d759cfeb67662ebd0a9e7841749a0b3122e400d07df66a920403672b5cf4
+audit_schedule:
+  baseline_target_count: 200
+  round_target_count: 20
+  endpoint_target_count: 200
+  historical_target_count: 20
+  historical_rounds: 19
+  expected_generations_per_seed: 40083
+privacy_gate:
+  minimum_original_exact_pair_reduction: 0.90
+  maximum_original_complete_profiles: 0
+  comparator_distinctive_exact_pairs: 50
+  comparator_distinctive_entities: 25
+  comparator_distinctive_field_types: 2
+  require_both_seeds: true
+expected_totals_per_seed:
+  trajectories: 4
+  federated_rounds: 80
+  conversation_presentations: 328000
+  optimizer_steps: 82000
+  audit_generations: 40083
+  utility_conversations: 2500
+expected_totals_combined:
+  trajectories: 8
+  federated_rounds: 160
+  conversation_presentations: 656000
+  optimizer_steps: 164000
+  audit_generations: 80166
+  utility_conversations: 5000
+checkpointing:
+  retained_rounds: [1, 10, 20]
+  rolling_resume_checkpoint: true
+  incomplete_round_policy: replay

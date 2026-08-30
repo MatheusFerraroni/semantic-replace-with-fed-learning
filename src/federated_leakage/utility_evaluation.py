@@ -34,6 +34,13 @@ HELDOUT_UTILITY_DATASET_SCHEMA_VERSION = "heldout-utility-dataset/v1"
 UTILITY_EVALUATION_SCHEMA_VERSION = "utility-evaluation/v1"
 UTILITY_EVALUATION_RESULT_SCHEMA_VERSION = "utility-evaluation-result/v1"
 UTILITY_CHECKPOINTS = ("B0", "F0-round-020", "F1-round-020")
+UTILITY_SEMANTIC_CHECKPOINTS = (
+    "B0",
+    "F0-round-020",
+    "F1-round-020",
+    "F4-round-020",
+    "F5-round-020",
+)
 UTILITY_EXPERIMENT_SEEDS = (101, 361506353)
 
 
@@ -185,17 +192,24 @@ def validate_utility_evaluation_spec(spec: object) -> UtilityEvaluationSpec:
             "peak_device_memory_bytes",
         ),
     )
-    if spec != expected:
+    semantic_expected = UtilityEvaluationSpec(
+        **{
+            **asdict(expected),
+            "checkpoints": UTILITY_SEMANTIC_CHECKPOINTS,
+        }
+    )
+    if spec not in {expected, semantic_expected}:
         raise UtilityEvaluationError("especificação de utilidade diverge do protocolo")
-    return expected
+    return spec
 
 
 def parse_utility_evaluation_spec(
     config: Mapping[str, Any],
 ) -> UtilityEvaluationSpec:
-    if not isinstance(config, Mapping) or config.get("schema_version") != (
-        "federated-leakage/main-config/v3"
-    ):
+    if not isinstance(config, Mapping) or config.get("schema_version") not in {
+        "federated-leakage/main-config/v3",
+        "federated-leakage/main-config/v4",
+    }:
         raise UtilityEvaluationError("configuração principal de utilidade é incompatível")
     section = config.get("utility_evaluation")
     expected_keys = {
@@ -345,7 +359,7 @@ def validate_utility_evaluation_result(
     if (
         result.schema_version != UTILITY_EVALUATION_RESULT_SCHEMA_VERSION
         or result.checkpoint_id != expected_checkpoint
-        or result.scenario not in {"B0", "F0", "F1"}
+        or result.scenario not in {"B0", "F0", "F1", "F4", "F5"}
         or (result.scenario == "B0" and result.round_id != 0)
         or (result.scenario != "B0" and result.round_id != 20)
         or type(result.experiment_seed) is not int
@@ -398,7 +412,7 @@ def evaluate_utility(
     if scenario == "B0":
         if round_id != 0:
             raise UtilityEvaluationError("checkpoint B0 de utilidade é inválido")
-    elif scenario not in {"F0", "F1"} or round_id != 20:
+    elif scenario not in {"F0", "F1", "F4", "F5"} or round_id != 20:
         raise UtilityEvaluationError("checkpoint federado de utilidade é inválido")
     try:
         import torch
@@ -509,7 +523,7 @@ def compare_utility_to_baseline(
     validate_utility_evaluation_result(final)
     if (
         baseline.scenario != "B0"
-        or final.scenario not in {"F0", "F1"}
+        or final.scenario not in {"F0", "F1", "F4", "F5"}
         or baseline.dataset_sha256 != final.dataset_sha256
         or baseline.experiment_seed != final.experiment_seed
         or baseline.model_provenance != final.model_provenance

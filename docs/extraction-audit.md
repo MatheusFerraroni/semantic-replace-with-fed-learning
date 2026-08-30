@@ -130,9 +130,11 @@ Os contratos ativos são `extraction-audit/v2`,
 `decoding_strategy=tokenwise_greedy_argmax/v1` e `rng_used=false`. Os leitores
 v1 existem apenas para inspeção histórica e nunca habilitam geração ou retomada.
 
-O piloto B0/F0/F1 invoca automaticamente a auditoria depois de cada uma das
-20 rodadas. Continuam fora deste contrato diagnósticos de perfis auxiliares,
-rank/NLL, controles negativos, F2/F3 e métricas das substituições F4/F5. A
+O piloto B0/F0/F1 invoca automaticamente a auditoria central depois de cada uma
+das 20 rodadas. O piloto F4/F5 reutiliza a mesma inferência greedy e acrescenta
+`semantic-substitution-audit/v1` para aliases correntes e históricos,
+cross-scoring e ambiguidades. Continuam fora destes contratos diagnósticos de
+perfis auxiliares, rank/NLL, controles negativos e F2/F3. A
 utilidade held-out do piloto v3 usa um avaliador causal agregado separado, sem
 geração de texto, descrito em `pilot-orchestrator.md`. O controle positivo
 canário possui executor paralelo próprio, descrito em

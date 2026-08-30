@@ -30,17 +30,19 @@ A campanha principal responde:
 1. Quando o avaliador fornece o nome, F1 reproduz mais pares corretos
    `nome -> tipo -> valor protegido` e mais perfis completos de vítimas que F0?
 2. O efeito permanece sob DP-SGD em F3 versus F2?
-3. Quais substituições corretamente associadas ao nome aparecem em F5 versus F4
-   e qual é o custo de utilidade?
+3. Quanto F4/F5 reduzem a reprodução dos perfis originais, quais substitutos
+   aparecem associados aos aliases corrente e históricos e qual é o custo de
+   utilidade?
 4. O modelo reproduz nomes ou outros valores de vítimas quando nenhuma identidade
    é fornecida na instrução?
 
 Resultado negativo ou inconclusivo é válido. Este protocolo é a fonte normativa
 para os dados, o ataque, a auditoria e as defesas. Os valores oficiais de
-execução do piloto promovido ficam em `configs/main-v3.yaml`; `main-v1.yaml` e
-`main-v2.yaml` são preservados byte a byte como históricos e não podem iniciar
-nem retomar essa execução. A configuração resolvida deve falhar se divergir
-deste documento.
+execução do piloto promovido ficam em `configs/main-v3.yaml`. O piloto da defesa
+rotativa usa `configs/main-v4.yaml` e
+`configs/semantic-substitution-pilot-v1.yaml`; `main-v1.yaml`–`main-v3.yaml` são
+preservados byte a byte e não podem iniciar nem retomar o novo run. A
+configuração resolvida deve falhar se divergir deste documento.
 
 Este documento especifica também etapas futuras da campanha. O estado executável
 de cada componente é mantido no README; uma seção normativa aqui não implica que
@@ -489,39 +491,43 @@ DP-SGD.
 
 ### 7.2 Substituição semântica
 
-Cada um dos oito valores não conhecidos recebe uma substituição do mesmo tipo e
-formato, estável para o par `(entidade, tipo)` durante toda a execução. CPFs
-substitutos também têm checksum inválido. Nenhuma substituição pode coincidir com
-valor original ou substituído do mesmo tipo. F4 e F5 da mesma semente usam o
-mesmo mapa. As quatro conversas protegidas de uma entidade recebem exatamente a
-mesma substituição para cada tipo.
+O piloto `semantic-substitution-pilot/v1` substitui os nove campos, inclusive o
+nome, somente nos dez clientes-vítima e antes da tokenização. Cada substituto
+mantém o tipo e o formato do campo. CPFs continuam com checksum inválido. O mapa
+é derivado de `(seed, client_id, entity_id, round_id)`: permanece fixo nas quatro
+conversas e quatro passagens locais da rodada, mas muda na rodada seguinte.
+F4/F5 reconstroem exatamente a mesma agenda; cenário, `k`, modelo e estado do
+treinamento não entram na derivação.
 
-O nome continua sendo dado protegido, mas permanece intacto no conjunto das
-vítimas para que o avaliador aplique o mesmo gatilho em F4 e F5. O adversário não
-recebe esse nome. A exceção deve ser declarada em todo resultado e significa que
-a substituição semântica não protege o nome. Nenhum dos outros oito valores
-originais chega à tokenização.
+Todo campo deve diferir do próprio original e dos substitutos anteriores da
+entidade. Nome, CPF, RG, telefone, e-mail e endereço também não podem coincidir
+com nenhum valor original validado. Nascimento, data e horário podem coincidir
+com outra entidade, e valores falsos podem colidir entre entidades ou rodadas.
+Essas colisões não são corrigidas: são contabilizadas, pares são deduplicados por
+`(alias, tipo, valor)` e aliases compartilhados não recebem atribuição por
+entidade.
 
-Em F4/F5, a ausência dos valores originais valida o processo, mas não é métrica
-comparativa. A campanha mede reprodução de substituições corretamente associadas
-ao nome e utilidade. Renovação por entidade e rodada ou por acesso à amostra é
-ablação separada.
+A conversa geral e os IDs técnicos permanecem intactos. Conversas substituídas
+e mapas não são persistidos nos clientes. O avaliador confiável reconstrói o mapa
+independentemente e é o único componente autorizado a persistir valores em sua
+área privada. Servidor e auxiliar nunca recebem conversas, originais, aliases ou
+mapas das vítimas.
 
-Para pares pré-fixados `(nome fornecido pelo avaliador, tipo, substituição)`, a
-ligação correta é a fração de pares consultados para os quais o modelo gera a
-substituição correta. Gerar valor pertencente a outro nome é associação incorreta.
-Somente o avaliador recebe os nomes e o mapa.
+Em F4/F5, o avaliador consulta o nome original e o alias corrente. Na rodada 20,
+consulta também os aliases das 19 rodadas anteriores para 20 participantes. A
+mesma geração é cruzada contra originais, substitutos correntes, históricos e de
+outras entidades sem nova inferência.
 
 ## 8. Auditoria
 
 O núcleo central descrito nas seções 8.1–8.3 está implementado para B0 e
-checkpoints F0/F1 pelos contratos `trusted-evaluator/v2`,
+checkpoints F0/F1/F4/F5 pelos contratos `trusted-evaluator/v2`,
 `audit-target-budget/v1`, `extraction-audit/v2`,
 `extraction-audit-record/v2`, `extraction-audit-result/v3` e
-`extraction-audit-journal/v3`. O piloto chama a auditoria automaticamente após
-cada rodada. A calibração positiva canária possui um executor paralelo próprio.
-Diagnósticos auxiliares, rank/NLL, controles negativos e métricas de substituição
-continuam especificados, mas ainda não possuem executor.
+`extraction-audit-journal/v3` e `semantic-substitution-audit/v1`. O piloto chama
+a auditoria automaticamente após cada rodada. A calibração positiva canária
+possui um executor paralelo próprio. Diagnósticos auxiliares, rank/NLL e
+controles negativos continuam pendentes.
 
 Antes da execução, o avaliador seleciona de forma estratificada 20
 participantes-alvo, dois por cliente-vítima. Ele aplica ao modelo inicial e aos
@@ -628,8 +634,9 @@ Os diagnósticos auxiliares usam amostras determinísticas dos perfis gerados na
 rodada atual e, separadamente, dos perfis acumulados de rodadas anteriores. Eles
 medem aprendizado do gatilho e sobreajuste, não vazamento das vítimas.
 
-Em F4/F5, registrar reprodução de pares nome-tipo-substituição, perfis completos
-substituídos e associações incorretas entre nomes e substituições.
+Em F4/F5, registrar reprodução de originais condicionada ao nome original,
+substitutos condicionados ao alias corrente ou histórico, perfis completos,
+associações cruzadas e ambiguidades causadas por aliases compartilhados.
 
 Um controle negativo pareado consulta 20 nomes e perfis nunca usados no
 treinamento, com o mesmo orçamento. A área sob a trajetória das rodadas 0-20 e a
@@ -819,8 +826,9 @@ A execução falha se:
 - DP não compuser todas as rodadas por conversa;
 - uma vítima não contabilizar exatamente 25 passos por rodada e 500 no total;
 - o ε realizado superar o alvo;
-- um dos oito valores originais chegar ao treinamento com substituição ativa;
-- F4 e F5 não usarem o mesmo mapa de substituições;
+- um dos nove valores originais da própria entidade chegar ao treinamento com
+  substituição ativa;
+- F4 e F5 não reconstruírem a mesma agenda de substituições por rodada;
 - uma extração direcionada for contada sem corresponder ao nome consultado;
 - configuração, modelo, tokenizador ou comprimento divergirem dos manifestos;
 - um processo CUDA determinístico iniciar sem

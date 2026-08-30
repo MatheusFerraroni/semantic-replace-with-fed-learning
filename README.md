@@ -13,8 +13,9 @@ do FedAvg, da auditoria central de extração, do orquestrador retomável do pil
 B0/F0/F1 de 20 rodadas, da calibração positiva vulnerável com canários completos
 e da avaliação sintética de utilidade. A investigação v4 promoveu `3e-5` para o
 novo piloto v3. A calibração federada 1×/2×/4× terminou com o primeiro gate em
-4×. A grade v2 de intensidade com seis braços e duas seeds está implementada;
-a campanha principal e as defesas continuam pendentes.
+4×. A grade v2 de intensidade selecionou `1e-4 / 4×` nas duas seeds. A
+substituição semântica rotativa e o piloto retomável F0/F1/F4/F5 estão
+implementados; sua execução científica e as demais defesas continuam pendentes.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
@@ -23,6 +24,8 @@ a campanha principal e as defesas continuam pendentes.
 - [Configuração da investigação greedy de learning rate](configs/memorization-calibration-v4.yaml)
 - [Configuração da calibração federada de exposição](configs/federated-memorization-calibration-v1.yaml)
 - [Configuração da grade federada de intensidade](configs/federated-memorization-grid-v2.yaml)
+- [Configuração do piloto com substituição rotativa](configs/semantic-substitution-pilot-v1.yaml)
+- [Configuração principal da substituição](configs/main-v4.yaml)
 - [Configuração sampling v1 (histórica, somente leitura)](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
@@ -30,6 +33,7 @@ a campanha principal e as defesas continuam pendentes.
 - [Calibração positiva de memorização](docs/memorization-calibration.md)
 - [Calibração federada de exposição local](docs/federated-memorization-calibration.md)
 - [Grade federada de intensidade](docs/federated-memorization-grid.md)
+- [Piloto de substituição semântica rotativa](docs/semantic-substitution-pilot.md)
 
 | Componente | Estado executável |
 | --- | --- |
@@ -42,10 +46,12 @@ a campanha principal e as defesas continuam pendentes.
 | Orquestração retomável do piloto B0/F0/F1 | Implementado |
 | Controle positivo vulnerável com canários completos | Implementado |
 | Calibração federada de exposição local 1×/2×/4× | Implementado; concluída com gate em 4× |
-| Grade federada 4×/8×/16×, duas LRs e duas seeds | Implementado; execução pendente |
-| DP-SGD e substituições semânticas | Não implementado |
-| Auditoria central de extração B0/F0/F1 | Implementado |
-| Utilidade sintética held-out em B0/F0-r20/F1-r20 | Implementado |
+| Grade federada 4×/8×/16×, duas LRs e duas seeds | Implementado; `1e-4 / 4×` selecionado |
+| Substituição semântica rotativa nos nove campos | Implementado; execução pendente |
+| Piloto retomável F0/F1/F4/F5 em duas seeds | Implementado; execução pendente |
+| DP-SGD | Não implementado |
+| Auditoria central de extração B0/F0/F1/F4/F5 | Implementado |
+| Utilidade sintética held-out em B0 e endpoints F0/F1/F4/F5 | Implementado |
 | Diagnósticos auxiliares, rank/NLL e controles negativos | Não implementado |
 
 ## Modelo de ameaça
@@ -189,9 +195,11 @@ ordenada quando respeita o template canônico. As métricas incluem:
 - nomes ou valores de vítimas gerados sem que o nome tenha sido fornecido;
 - valores auxiliares, apenas como diagnóstico de aprendizado e sobreajuste.
 
-Em F4/F5, as métricas principais usam as substituições corretamente associadas
-ao nome. Os valores originais servem somente para verificar a integridade do
-processo e permanecem exclusivos do avaliador.
+Em F4/F5, o nome também é substituído. O avaliador consulta separadamente o nome
+original, o alias atual e, no endpoint, aliases das rodadas anteriores. As
+gerações são cruzadas contra valores originais e substitutos sem nova inferência.
+Aliases compartilhados são marcados como ambíguos, pares são deduplicados por
+`(alias, tipo, valor)` e somente o avaliador acessa os mapas privados.
 
 O núcleo executável aceita orçamentos aninhados de 1, 5, 20 ou 200 participantes.
 O orçamento de referência usa 20 alvos, exatamente dois por cliente, e executa
@@ -510,6 +518,26 @@ A grade v2 avalia `4×`, `8×` e `16×` com learning rates das vítimas `3e-5` e
 dois jobs podem ocupar L40S diferentes em paralelo. Consulte
 [`docs/federated-memorization-grid.md`](docs/federated-memorization-grid.md).
 
+## Executar o piloto de substituição semântica
+
+O piloto usa `1e-4 / 4×` somente nas vítimas, mantém o auxiliar em `3e-5 / 1×`
+e executa F0, F1, F4 e F5 separadamente nas duas seeds. Em F4/F5, os nove
+campos são substituídos localmente e mudam a cada rodada. Rode primeiro os dois
+preflights:
+
+```bash
+sbatch --job-name=semantic-substitution-s101-v1 \
+  scripts/run_semantic_substitution_pilot_l40s.sbatch preflight 101
+sbatch --job-name=semantic-substitution-s361506353-v1 \
+  scripts/run_semantic_substitution_pilot_l40s.sbatch preflight 361506353
+```
+
+Após os dois runs completos, gere o resumo conjunto com
+`python -m federated_leakage.summarize_semantic_substitution_pilot --config
+configs/semantic-substitution-pilot-v1.yaml`. O procedimento completo e as
+regras de retomada estão em
+[`docs/semantic-substitution-pilot.md`](docs/semantic-substitution-pilot.md).
+
 ## Gerar um dataset para inspeção
 
 Depois da instalação editável, uma única seed gera os dez clientes-vítima e as
@@ -540,8 +568,9 @@ rollback, deltas em streaming, pesos FedAvg, aplicação atômica, pareamento F0
 e auditoria com orçamentos aninhados, checkpoints `safetensors`, retomada
 transacional, continuidade independente das trajetórias e recuperação de falha
 após auditoria, além do controle positivo canário com doses prefixadas,
-checkpoint por braço e critério distintivo, e do carregamento estrito e offline
-do modelo. Os
+checkpoint por braço e critério distintivo, substituição rotativa dos nove
+campos, colisões falsas ambíguas, auditoria corrente/histórica, checkpoints do
+piloto F0/F1/F4/F5 e carregamento estrito e offline do modelo. Os
 testes com os pesos e o tokenizador reais são opt-in e exigem um cache já
 preparado:
 

@@ -54,9 +54,11 @@ todos os parâmetros do Tucano 2 0.6B.
   perfil. Se algum for introduzido, ele deve ser registrado, protegido e
   auditado como os demais dados do participante.
 - Preservar a aparência dos documentos sintéticos, forçar checksums inválidos e
-  rejeitar colisões de nome, CPF, RG, telefone, e-mail e endereço entre vítimas,
-  auxiliar, controles e substituições. Data de nascimento, data de atendimento
-  e horário de atendimento podem se repetir entre entidades. Gerar nascimentos
+  rejeitar colisões de nome, CPF, RG, telefone, e-mail e endereço entre os fluxos
+  originais de vítimas, auxiliar e controles. Substitutos desses tipos não podem
+  coincidir com originais, mas colisões entre valores falsos são permitidas e
+  auditadas. Data de nascimento, data de atendimento e horário de atendimento
+  podem se repetir entre entidades. Gerar nascimentos
   entre `1966-01-01` e `2006-12-31`, equivalentes a 20–60 anos na referência
   fixa `2026-12-31`.
 - Gerar horários de atendimento somente em intervalos humanos de 15 minutos,
@@ -114,11 +116,15 @@ todos os parâmetros do Tucano 2 0.6B.
 - Recalcular e versionar os parâmetros do contabilizador de privacidade antes da
   campanha sempre que mudarem a unidade de privacidade, amostragem, lote, passos
   ou rodadas. Não reutilizar sigmas de uma configuração incompatível.
-- Manter substituições estáveis por entidade e tipo e idênticas no par F4/F5.
-  Aplicar a mesma substituição às quatro conversas protegidas da entidade.
-  O nome permanece no conjunto transformado somente para que o avaliador consiga
-  aplicar o mesmo gatilho nos pares comparáveis. O adversário não recebe esse
-  nome, e a exceção não o reclassifica como dado não protegido.
+- No piloto rotativo v1, substituir os nove campos, inclusive o nome, antes da
+  tokenização. Manter o mapa estável nas quatro conversas e quatro passagens
+  locais da entidade, renová-lo na rodada federada seguinte e reconstruir a
+  mesma agenda em F4/F5 sem compartilhar estado privado.
+- Proibir a reutilização do próprio original e de substitutos anteriores da
+  entidade. Para nome, CPF, RG, telefone, e-mail e endereço, proibir também
+  coincidência com qualquer original validado. Permitir colisões entre valores
+  falsos, registrando multiplicidades e tratando aliases compartilhados como
+  ambíguos na auditoria.
 - Manter os conjuntos das vítimas disjuntos. O adversário nunca pode acessar
   dados, valores protegidos, atualizações locais, arquivos do auditor ou mapas de
   substituição das vítimas.
@@ -254,6 +260,10 @@ todos os parâmetros do Tucano 2 0.6B.
   por seed. `singleton` impede duplicatas da mesma seed, mas permite duas L40S
   em paralelo. Usar modos explícitos, 24 horas, ambiente offline e retomada
   manual; não persistir AdamW nem configurar requeue.
+- Executar cada seed do piloto de substituição pelo launcher
+  `scripts/run_semantic_substitution_pilot_l40s.sbatch`, com job name específico
+  por seed, modos `preflight`, `start` ou `resume`, ambiente offline e retomada
+  manual. Nunca persistir conversas substituídas nem mapas nos clientes.
 - Não alterar pressupostos experimentais silenciosamente. Registrar mudanças no
   protocolo, README ou configuração da execução.
 - Relatar privacidade e utilidade juntas, inclusive resultados negativos e

@@ -414,6 +414,7 @@ def parse_extraction_audit_spec(config: Mapping[str, Any]) -> AuditSpec:
     if config.get("schema_version") not in {
         "federated-leakage/main-config/v2",
         "federated-leakage/main-config/v3",
+        "federated-leakage/main-config/v4",
     }:
         raise ExtractionAuditError(
             "configuração amostrada legada não pode iniciar nova auditoria"
