@@ -9,7 +9,7 @@ caminhos relativos.
 
 ## Modelo de referência padrão
 
-Enquanto o modelo refinado não estiver disponível, o consumidor usa:
+O modo upstream padrão do consumidor usa:
 
 ```yaml
 model:
@@ -37,7 +37,8 @@ O artefato refinado deve:
 - ser carregável com `AutoModelForCausalLM.from_pretrained()` e
   `AutoTokenizer.from_pretrained()` apontando somente para o diretório local;
 - usar arquivos `safetensors` para os pesos;
-- armazenar todos os parâmetros em `bfloat16`;
+- usar o perfil legado BF16 ou um perfil de produtor explicitamente versionado,
+  com dtype armazenado e conversão validados de forma fail-closed;
 - permanecer fora do Git.
 
 No contrato v1, uma mudança de tokenizador, vocabulário, arquitetura ou tokens
@@ -151,7 +152,7 @@ O consumidor valida a seguinte assinatura antes e depois da carga:
 | Vocabulário | `49152` |
 | Contexto nativo | `4096` |
 | Comprimento experimental | `1024` |
-| Dtype dos pesos | `bfloat16` |
+| Dtype em memória | `bfloat16` |
 
 O tokenizador deve ser o fast tokenizer original, com padding à direita, sem
 adição automática de BOS ou EOS e sem remapeamento de tokens. Os IDs obrigatórios
@@ -202,6 +203,42 @@ model:
 
 O hash composto somente por zeros é um placeholder sintaticamente válido e deve
 ser substituído pelo `artifact_sha256` real antes da carga.
+
+### Perfil fixado `queroquero-export-v1`
+
+O braço Fórum/Tec usa uma segunda interpretação estrita do mesmo schema de
+manifesto, sem enfraquecer o perfil legado. A configuração canônica é
+[`configs/main-v5.yaml`](../configs/main-v5.yaml) e fixa:
+
+| Identidade | Valor |
+| --- | --- |
+| `artifact_id` | `ae3238fde6675942cac5` |
+| ZIP SHA-256 | `7f523ee9fa73f085ed3cd16ca37c86f45fb2c5aa1b0cff63aab4718c7aa77bc0` |
+| Manifesto SHA-256 | `4b91721b07dc82d47fef2aaf898b4cae2322ca617cd99a2cb903a13965574a48` |
+| Artefato SHA-256 | `74046c639049eb76c58696127c469a24ecf8f0637b640d64fa9ab2072f269627` |
+| Pesos SHA-256 | `3c935258a769c800b89c1c0e4006b45bcef9e470f84d93c7362c3dd79c3cccac` |
+| Braço | `forum_tech` |
+| Passos do produtor | `52000` |
+
+Esse perfil aceita exatamente `config.json`, `generation_config.json`,
+`model.safetensors`, `tokenizer.json`, `tokenizer_config.json` e o manifesto.
+Os pesos estão armazenados em FP32 e são carregados diretamente em BF16 pela
+versão fixada do Transformers, com `safetensors`, atenção eager, código remoto
+desabilitado e sem fallback. O modelo em memória continua sujeito à assinatura
+BF16 da tabela anterior.
+
+O manifesto declara os fingerprints de tokenizador
+`577ec9987242665aaea00504bc27a28f98c9675039be4ece5ee959934cb42e61`
+e `faa35ccd17cec9862cd695770ae9f0820cff297daa48384de8518a60f325a2cd`.
+Além de validar esses valores e os hashes dos arquivos, o consumidor carrega o
+tokenizador local e o upstream pinado com a mesma versão de runtime e compara
+classe, vocabulário completo, backend normalizado, IDs, tokens especiais e
+codificações determinísticas.
+
+O ZIP é preparado por
+`python -m federated_leakage.prepare_refined_artifact`; travessia, links,
+entradas extras, hashes divergentes, destino existente ou publicação parcial
+são rejeitados. O ZIP, o diretório preparado e os pesos permanecem fora do Git.
 
 No modo local, o diretório é fornecido por argumento absoluto de
 execução. O caminho não é versionado e não pode apontar por `..` para outro

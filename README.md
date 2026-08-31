@@ -14,8 +14,10 @@ B0/F0/F1 de 20 rodadas, da calibração positiva vulnerável com canários compl
 e da avaliação sintética de utilidade. A investigação v4 promoveu `3e-5` para o
 novo piloto v3. A calibração federada 1×/2×/4× terminou com o primeiro gate em
 4×. A grade v2 de intensidade selecionou `1e-4 / 4×` nas duas seeds. A
-substituição semântica rotativa e o piloto retomável F0/F1/F4/F5 estão
-implementados; sua execução científica e as demais defesas continuam pendentes.
+substituição semântica rotativa e o piloto retomável F0/F1/F4/F5 foram aprovados
+nas duas seeds de desenvolvimento. O carregamento fail-closed do Tucano refinado
+Fórum/Tec, o DP-AdamW por conversa e o piloto retomável refinado F0-F5 também
+estão implementados; sua execução científica na L40S continua pendente.
 
 - [Protocolo experimental](docs/protocol.md)
 - [Contrato do artefato do modelo](docs/model-artifact-contract.md)
@@ -26,6 +28,8 @@ implementados; sua execução científica e as demais defesas continuam pendente
 - [Configuração da grade federada de intensidade](configs/federated-memorization-grid-v2.yaml)
 - [Configuração do piloto com substituição rotativa](configs/semantic-substitution-pilot-v1.yaml)
 - [Configuração principal da substituição](configs/main-v4.yaml)
+- [Configuração principal do modelo refinado e DP](configs/main-v5.yaml)
+- [Piloto refinado F0-F5](configs/refined-defense-pilot-v1.yaml)
 - [Configuração sampling v1 (histórica, somente leitura)](configs/main-v1.yaml)
 - [Gerador de perfis e conversas sintéticas](docs/synthetic-profile-generator.md)
 - [Avaliador confiável e auditoria central](docs/extraction-audit.md)
@@ -34,6 +38,7 @@ implementados; sua execução científica e as demais defesas continuam pendente
 - [Calibração federada de exposição local](docs/federated-memorization-calibration.md)
 - [Grade federada de intensidade](docs/federated-memorization-grid.md)
 - [Piloto de substituição semântica rotativa](docs/semantic-substitution-pilot.md)
+- [Piloto refinado com DP-AdamW](docs/refined-dp-pilot.md)
 
 | Componente | Estado executável |
 | --- | --- |
@@ -47,11 +52,13 @@ implementados; sua execução científica e as demais defesas continuam pendente
 | Controle positivo vulnerável com canários completos | Implementado |
 | Calibração federada de exposição local 1×/2×/4× | Implementado; concluída com gate em 4× |
 | Grade federada 4×/8×/16×, duas LRs e duas seeds | Implementado; `1e-4 / 4×` selecionado |
-| Substituição semântica rotativa nos nove campos | Implementado; execução pendente |
-| Piloto retomável F0/F1/F4/F5 em duas seeds | Implementado; execução pendente |
-| DP-SGD | Não implementado |
-| Auditoria central de extração B0/F0/F1/F4/F5 | Implementado |
-| Utilidade sintética held-out em B0 e endpoints F0/F1/F4/F5 | Implementado |
+| Substituição semântica rotativa nos nove campos | Implementado; aprovado em duas seeds |
+| Piloto retomável F0/F1/F4/F5 em duas seeds | Implementado; concluído e aprovado |
+| DP-AdamW por conversa nas vítimas | Implementado; execução refinada pendente |
+| Artefato refinado Fórum/Tec | Preparação e carga fail-closed implementadas |
+| Piloto refinado F0-F5 em duas seeds | Implementado; execução pendente |
+| Auditoria central de extração B0-F5 | Implementado |
+| Utilidade sintética held-out em B0 e endpoints F0-F5 | Implementado |
 | Diagnósticos auxiliares, rank/NLL e controles negativos | Não implementado |
 
 ## Modelo de ameaça
@@ -233,6 +240,12 @@ As dependências de modelo são opcionais para manter o gerador leve:
 python -m pip install -e '.[model]'
 ```
 
+O treinamento privado exige também o Opacus fixado:
+
+```bash
+python -m pip install -e '.[model,dp]'
+```
+
 O baseline é baixado somente por uma preparação explícita. O comando restringe
 o download aos arquivos necessários do snapshot e valida arquitetura, pesos e
 tokenizador antes de terminar:
@@ -274,6 +287,23 @@ O artefato é verificado integralmente conforme o contrato v1 antes de qualquer
 chamada do Transformers. Não são permitidos links simbólicos, pesos que não sejam
 `safetensors`, código remoto, quantização, offload ou fallback de revisão,
 dispositivo ou origem.
+
+O export Fórum/Tec fixado usa o perfil `queroquero-export-v1`. Ele é preparado
+diretamente do ZIP externo sem alterar o projeto produtor:
+
+```bash
+python -m federated_leakage.prepare_refined_artifact \
+  --config configs/main-v5.yaml \
+  --archive /caminho/absoluto/ae3238fde6675942cac5.zip \
+  --output-root artifacts/models
+```
+
+O destino canônico é
+`artifacts/models/ae3238fde6675942cac5/`, ignorado pelo Git. A preparação exige
+ZIP, manifesto, inventário e pesos exatos, publica por renomeação atômica e
+recusa sobrescrita. Na carga, o tokenizador local é comparado ao snapshot
+upstream pinado com a mesma versão de runtime. Os pesos FP32 do export são
+carregados diretamente como BF16 e atenção eager, sem fallback.
 
 ## Tokenizar conversas para treinamento
 
@@ -317,6 +347,29 @@ O estado aleatório do PyTorch deriva da única seed do experimento, cliente e
 rodada. Cenário, apresentação auxiliar e `k` não entram na derivação. A
 repetibilidade bit a bit é exigida no mesmo dispositivo e ambiente, não entre
 CPU, CUDA e MPS.
+
+## Treinar uma vítima com DP-AdamW
+
+`train_private_local_client()` aplica clipping flat por conversa e ruído
+gaussiano ao AdamW `1e-4` usando Opacus `1.6.0` em modo `hooks`. Cada cliente
+possui 100 unidades de privacidade, amostragem Poisson `q=0,04`, norma máxima
+`1,0`, lote físico máximo de uma conversa e 100 passos por rodada. O accountant
+RDP persiste por cliente durante 20 rodadas; o ε relatado pela federação é o
+máximo entre os dez clientes disjuntos, nunca a soma.
+
+| ε alvo | Sigma | ε realizado em 2.000 passos | Ordem RDP |
+| ---: | ---: | ---: | ---: |
+| 3 | 2,81 | 2,98777705562 | 7,4 |
+| 8 | 1,36 | 7,96431428079 | 3,7 |
+
+O preflight recalcula ambos com Opacus e falha se qualquer valor ou versão
+divergir. F2/F3 do mesmo orçamento reconstroem a mesma agenda Poisson e o mesmo
+ruído; cenário e `k` não entram na derivação. O auxiliar continua não privado,
+com AdamW `3e-5` e 25 passos. Resultados privados não contêm loss, norma,
+clipping rate, tokens nem métricas individuais das vítimas.
+
+Essa garantia é por conversa. Como um participante aparece em quatro conversas
+protegidas distintas, ela não constitui DP no nível do participante.
 
 ## Agregar uma rodada F0/F1
 
@@ -537,6 +590,47 @@ Após os dois runs completos, gere o resumo conjunto com
 configs/semantic-substitution-pilot-v1.yaml`. O procedimento completo e as
 regras de retomada estão em
 [`docs/semantic-substitution-pilot.md`](docs/semantic-substitution-pilot.md).
+
+## Executar o piloto refinado F0-F5
+
+O piloto `refined-defense-pilot/v1` começa sempre do export Fórum/Tec original e
+executa, por seed, F0/F1, F2/F3 com ε 3, F2/F3 com ε 8 e F4/F5. F0/F1 formam um
+gate obrigatório nas duas seeds antes das defesas. Por isso, após ambos os jobs
+produzirem seus gates, uma seed que terminou em `awaiting-peer-vulnerability-gate`
+deve ser submetida novamente em modo `resume`.
+
+Antes do piloto científico, a ordem operacional é:
+
+```bash
+# 1 e 100 passos privados reais, sem persistir pesos
+python -m federated_leakage.smoke_private_training \
+  --config configs/main-v5.yaml \
+  --model-artifact-dir "$PWD/artifacts/models/ae3238fde6675942cac5" \
+  --cache-dir artifacts/huggingface --device cuda --epsilon 3 --steps 1
+
+python -m federated_leakage.smoke_private_training \
+  --config configs/main-v5.yaml \
+  --model-artifact-dir "$PWD/artifacts/models/ae3238fde6675942cac5" \
+  --cache-dir artifacts/huggingface --device cuda --epsilon 3 --steps 100
+
+# preflight de cada seed no Slurm
+sbatch --job-name=refined-defense-s101-v1 \
+  scripts/run_refined_defense_pilot_l40s.sbatch preflight 101
+sbatch --job-name=refined-defense-s361506353-v1 \
+  scripts/run_refined_defense_pilot_l40s.sbatch preflight 361506353
+```
+
+O launcher aceita apenas `preflight`, `start` ou `resume`, usa uma L40S por
+seed, execução totalmente offline e `CUBLAS_WORKSPACE_CONFIG=:4096:8`. O resumo
+conjunto é produzido somente após os dois `completed.json`:
+
+```bash
+python -m federated_leakage.summarize_refined_defense_pilot \
+  --output-root outputs
+```
+
+Consulte [`docs/refined-dp-pilot.md`](docs/refined-dp-pilot.md) para gates,
+checkpoints e critérios de classificação.
 
 ## Gerar um dataset para inspeção
 

@@ -1,0 +1,112 @@
+# Piloto refinado com DP-AdamW
+
+Versão: `refined-defense-pilot/v1`.
+
+Este piloto começa sempre do artefato Fórum/Tec
+`ae3238fde6675942cac5`. Checkpoints upstream, da grade, da substituição ou da
+calibração não são aceitos como baseline.
+
+## Matriz fixada
+
+Cada seed (`101` e `361506353`) executa oito trajetórias independentes de 20
+rodadas, com `k=1`:
+
+| Trajetória | Vítimas | Auxiliar |
+| --- | --- | --- |
+| F0 / F1 | AdamW `1e-4`, 4 passagens, 100 passos | benigno / adversário, AdamW `3e-5`, 25 passos |
+| F2 / F3, ε 3 | DP-AdamW, sigma `2,81`, 100 passos | benigno / adversário, não privado |
+| F2 / F3, ε 8 | DP-AdamW, sigma `1,36`, 100 passos | benigno / adversário, não privado |
+| F4 / F5 | substituição rotativa, AdamW `1e-4`, 4 passagens | benigno / adversário, não privado |
+
+O DP usa cada uma das 100 conversas do cliente como unidade, Poisson `q=0,04`,
+clipping flat `1,0`, lote físico máximo 1, Opacus `1.6.0`, RDP accountant e
+`delta=1e-5`. O accountant é independente por cliente e persiste por 2.000
+passos. O ε agregado reportado é o máximo dos dez clientes disjuntos.
+
+F2/F3 do mesmo orçamento reconstroem a mesma agenda Poisson e o mesmo ruído.
+Cenário e `k` não entram na derivação. A implementação não publica loss, normas
+ou clipping rate de vítimas.
+
+## Gates
+
+O runner executa B0 e F0/F1 antes das defesas. Em cada seed, F0 e F1 precisam
+atingir ao menos 50 pares distintivos, 25 vítimas e dois tipos distintivos, com
+B0 abaixo desse gate. As duas seeds precisam produzir gates válidos antes de
+F2-F5.
+
+Se uma seed terminar primeiro, ela retorna
+`awaiting-peer-vulnerability-gate` sem iniciar as defesas. Depois que a outra
+seed publicar seu gate, submeta a primeira novamente com `resume`. Um gate
+vulnerável insuficiente produz `inconclusive.json` e bloqueia F2-F5.
+
+Para cada ε, F2 é comparado a F0 e F3 a F1. A classificação por seed exige
+redução de pelo menos 90% dos pares originais exatos e zero perfil original
+completo. O resumo de duas seeds classifica o orçamento como `approved`,
+`unstable`, `insufficient` ou `inconclusive`. Substituição e utilidade são
+relatadas no mesmo resultado.
+
+## Preparação e smokes
+
+No headnode, prepare o ambiente e o artefato:
+
+```bash
+python -m pip install -e '.[model,dp]'
+
+python -m federated_leakage.prepare_refined_artifact \
+  --config configs/main-v5.yaml \
+  --archive /caminho/absoluto/ae3238fde6675942cac5.zip \
+  --output-root artifacts/models
+```
+
+Na L40S, com cache upstream já disponível e ambiente offline:
+
+```bash
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
+python -m federated_leakage.smoke_private_training \
+  --config configs/main-v5.yaml \
+  --model-artifact-dir "$PWD/artifacts/models/ae3238fde6675942cac5" \
+  --cache-dir artifacts/huggingface --device cuda --epsilon 3 --steps 1
+
+python -m federated_leakage.smoke_private_training \
+  --config configs/main-v5.yaml \
+  --model-artifact-dir "$PWD/artifacts/models/ae3238fde6675942cac5" \
+  --cache-dir artifacts/huggingface --device cuda --epsilon 3 --steps 100
+```
+
+Ambos restauram o modelo e mostram `escrita: nao`. O modo `hooks` é obrigatório;
+OOM ou incompatibilidade interrompem a execução sem fallback.
+
+## Slurm e retomada
+
+Execute primeiro os preflights:
+
+```bash
+sbatch --job-name=refined-defense-s101-v1 \
+  scripts/run_refined_defense_pilot_l40s.sbatch preflight 101
+sbatch --job-name=refined-defense-s361506353-v1 \
+  scripts/run_refined_defense_pilot_l40s.sbatch preflight 361506353
+```
+
+Depois use `start` para cada seed. Após `TIMEOUT`, confira `sacct` e os logs e
+submeta apenas a seed afetada com `resume`. Nunca execute dois jobs simultâneos
+para o mesmo run ID. `singleton` impede duplicatas com o mesmo job name.
+
+Cada rodada é confirmada somente depois de treinamento, FedAvg, auditoria,
+checkpoint e marcador. Rodadas incompletas são repetidas. Checkpoints permanentes
+ficam nas rodadas 1, 10 e 20; nas demais há somente um checkpoint móvel. Pesos
+usam `safetensors`; accountants são persistidos, mas otimizadores, gradientes,
+tokens e conversas não.
+
+Ao final das duas seeds:
+
+```bash
+python -m federated_leakage.summarize_refined_defense_pilot \
+  --output-root outputs
+```
+
+Os totais esperados são 16 trajetórias, 320 rodadas, 328.000 passos, 122.086
+gerações greedy e 9.000 avaliações de utilidade. A contagem privada de
+apresentações não é fixada: o resultado registra as seleções Poisson realizadas.

@@ -466,20 +466,27 @@ grupo que cubra toda a contribuição do participante.
 ```yaml
 privacy_records_per_client: 100
 sampling_rate: 0.04
-accounting_steps_per_round: 25
-accounting_total_steps: 500
+accounting_steps_per_round: 100
+accounting_total_steps: 2000
 target_epsilons: [3.0, 8.0]
 delta: 0.00001
 max_grad_norm: 1.0
 accountant: rdp
 poisson_sampling: true
 composition_rounds: 20
-noise_multiplier_by_target_epsilon: {"3.0": 1.58, "8.0": 0.91}
+noise_multiplier_by_target_epsilon: {"3.0": 2.81, "8.0": 1.36}
+realized_epsilon_by_target: {"3.0": 2.98777705562, "8.0": 7.96431428079}
+optimal_rdp_order_by_target: {"3.0": 7.4, "8.0": 3.7}
+opacus_version: 1.6.0
+grad_sample_mode: hooks
+secure_mode: false
 ```
 
-O clipping ocorre por conversa. Cada rodada executa 25 passos privados e cada
-vítima compõe 500 passos. Antes da campanha, a implementação deve reproduzir o
-cálculo com a versão pinada do Opacus e registrar sigma, ε realizado e ordem RDP
+O clipping ocorre por conversa. Cada rodada executa 100 passos privados e cada
+vítima compõe 2.000 passos. O lote físico máximo é uma conversa, enquanto o
+tamanho esperado usado pelo mecanismo é quatro. Antes da campanha, a
+implementação reproduz o
+cálculo com a versão pinada do Opacus e registra sigma, ε realizado e ordem RDP
 ótima. A execução falha se o ε realizado superar o alvo. Qualquer mudança de
 unidade, amostragem, lote, passos ou rodadas invalida os sigmas e exige novo
 cálculo versionado.
@@ -488,6 +495,19 @@ O otimizador local da vítima é reiniciado a cada cliente e rodada; o accountan
 da vítima persiste nas 20 rodadas. Um lote Poisson vazio continua contando como
 passo privado conforme a semântica pinada do Opacus. O auxiliar não recebe
 DP-SGD.
+
+O mecanismo implementado é reportado como **DP-AdamW**: clipping e ruído DP-SGD
+são aplicados ao AdamW `1e-4` das vítimas. O auxiliar permanece não privado com
+AdamW `3e-5`. `secure_mode=false` foi escolhido para pesquisa determinística e
+não deve ser descrito como implementação criptográfica de produção. F2/F3 do
+mesmo ε usam agendas Poisson e ruído pareados; seed ou ε diferentes usam fluxos
+separados. Os dez clientes possuem participantes disjuntos, então o orçamento
+federado relatado é o maior ε individual, não a soma.
+
+O executor não publica perdas, normas, clipping rate nem métricas locais das
+vítimas. Checkpoints privados contêm apenas o modelo global, estados mínimos dos
+dez accountants, ε, fingerprints e hashes seguros. Otimizadores, gradientes,
+tokens e conversas não são persistidos.
 
 ### 7.2 Substituição semântica
 
@@ -523,10 +543,30 @@ consulta também os aliases das 19 rodadas anteriores para 20 participantes. A
 mesma geração é cruzada contra originais, substitutos correntes, históricos e de
 outras entidades sem nova inferência.
 
+### 7.3 Piloto refinado F0-F5
+
+O piloto `refined-defense-pilot/v1` reinicia todos os cenários no artefato
+Fórum/Tec `ae3238fde6675942cac5`, nunca em checkpoints upstream ou de
+calibração. Ele executa nas seeds `101` e `361506353`, com `k=1`, oito
+trajetórias de 20 rodadas por seed: F0/F1, F2/F3 em ε 3, F2/F3 em ε 8 e F4/F5.
+
+F0/F1 são executados antes das defesas e precisam atingir, nas duas seeds, 50
+pares distintivos exatos, 25 vítimas expostas e dois tipos distintivos, com B0
+abaixo do gate. Se qualquer comparador não tiver sinal, o resultado é
+`inconclusive` e F2-F5 não são iniciados. Os gates das duas seeds incluem a
+configuração, o baseline e os resultados F0/F1 e são validados antes de liberar
+as defesas.
+
+O modelo, os dez accountants e os hashes da rodada são retomáveis. Uma rodada
+só é confirmada depois de treinamento, agregação, auditoria, utilidade quando
+aplicável e checkpoint. As rodadas 1, 10 e 20 são permanentes; as demais usam um
+único checkpoint móvel. Consulte
+[`refined-dp-pilot.md`](refined-dp-pilot.md) para comandos e totais.
+
 ## 8. Auditoria
 
 O núcleo central descrito nas seções 8.1–8.3 está implementado para B0 e
-checkpoints F0/F1/F4/F5 pelos contratos `trusted-evaluator/v2`,
+checkpoints F0-F5 pelos contratos `trusted-evaluator/v2`,
 `audit-target-budget/v1`, `extraction-audit/v2`,
 `extraction-audit-record/v2`, `extraction-audit-result/v3` e
 `extraction-audit-journal/v3` e `semantic-substitution-audit/v1`. O piloto chama

@@ -116,6 +116,19 @@ todos os parâmetros do Tucano 2 0.6B.
 - Recalcular e versionar os parâmetros do contabilizador de privacidade antes da
   campanha sempre que mudarem a unidade de privacidade, amostragem, lote, passos
   ou rodadas. Não reutilizar sigmas de uma configuração incompatível.
+- No piloto refinado v1, usar DP-AdamW somente nas vítimas, com Opacus `1.6.0`,
+  conversa como unidade, Poisson `q=0,04`, 100 passos por rodada, 2.000 passos
+  totais, clipping flat `1,0`, lote físico máximo 1, `delta=1e-5`, hooks e
+  `secure_mode=false`. Fixar sigma `2,81` para ε 3 e `1,36` para ε 8 e falhar
+  se o accountant não reproduzir ε `2,98777705562`/ordem `7,4` ou ε
+  `7,96431428079`/ordem `3,7`.
+- Manter um accountant por cliente-vítima durante as 20 rodadas e relatar o
+  máximo dos dez ε, nunca a soma. Reiniciar o AdamW a cada cliente e rodada.
+  F2/F3 do mesmo orçamento devem reconstruir as mesmas agendas Poisson e de
+  ruído; seed e ε diferentes usam fluxos separados. O auxiliar nunca recebe DP.
+- Não persistir nem publicar loss, normas, clipping rate ou métricas individuais
+  das vítimas privadas. Checkpoints podem conter somente o modelo global, os
+  estados mínimos dos accountants, ε, fingerprints e hashes seguros.
 - No piloto rotativo v1, substituir os nove campos, inclusive o nome, antes da
   tokenização. Manter o mapa estável nas quatro conversas e quatro passagens
   locais da entidade, renová-lo na rodada federada seguinte e reconstruir a
@@ -172,6 +185,14 @@ todos os parâmetros do Tucano 2 0.6B.
   checkpoint móvel nas demais. Persistir pesos exclusivamente em `safetensors`,
   sem otimizadores, deltas, tokens, textos ou registros protegidos.
 - Reiniciar e reexecutar todos os cenários quando o artefato inicial mudar.
+- O piloto refinado usa exclusivamente o perfil `queroquero-export-v1` do
+  artefato Fórum/Tec `ae3238fde6675942cac5`, braço `forum_tech` com 52.000
+  passos. Validar ZIP, manifesto, inventário, pesos FP32 e equivalência integral
+  do tokenizador; carregar diretamente em BF16 com atenção eager e sem fallback.
+- Executar F0/F1 antes de F2-F5 no piloto refinado e exigir nas duas seeds pelo
+  menos 50 pares distintivos, 25 vítimas e dois tipos distintivos, com B0 abaixo
+  do gate. Se qualquer seed falhar, encerrar como inconclusivo sem executar
+  silenciosamente as defesas.
 - Investigar a capacidade de memorização em execução separada com seed `101`,
   20 perfis-canário completos e disjuntos e quatro braços independentes, todos
   com 160 repetições e partindo do mesmo baseline pinado. Variar somente o
@@ -267,6 +288,11 @@ todos os parâmetros do Tucano 2 0.6B.
   `scripts/run_semantic_substitution_pilot_l40s.sbatch`, com job name específico
   por seed, modos `preflight`, `start` ou `resume`, ambiente offline e retomada
   manual. Nunca persistir conversas substituídas nem mapas nos clientes.
+- Executar cada seed do piloto refinado pelo launcher
+  `scripts/run_refined_defense_pilot_l40s.sbatch`, com job name específico por
+  seed, modos `preflight`, `start` ou `resume`, uma L40S, ambiente offline,
+  Opacus `1.6.0` e retomada manual. Executar primeiro smokes reais de 1 e 100
+  passos privados; incompatibilidade de hooks ou OOM deve falhar sem fallback.
 - Não alterar pressupostos experimentais silenciosamente. Registrar mudanças no
   protocolo, README ou configuração da execução.
 - Relatar privacidade e utilidade juntas, inclusive resultados negativos e

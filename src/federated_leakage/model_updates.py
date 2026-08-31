@@ -11,6 +11,10 @@ from .model_contracts import (
     EXPECTED_WEIGHT_DTYPE,
     LoadedModelBundle,
 )
+from .dp_contracts import (
+    PRIVATE_MODEL_UPDATE_SCHEMA_VERSION,
+    PrivateLocalTrainingResult,
+)
 from .training_contracts import (
     LOCAL_MODEL_UPDATE_SCHEMA_VERSION,
     LocalTrainingError,
@@ -155,15 +159,20 @@ def restore_model_parameter_snapshot(
 def iter_local_parameter_deltas(
     model_bundle: LoadedModelBundle,
     snapshot: ModelParameterSnapshot,
-    result: LocalTrainingResult,
+    result: LocalTrainingResult | PrivateLocalTrainingResult,
 ) -> Iterator[ParameterDelta]:
     """Emite o delta não escalado em CPU/float32, um parâmetro por vez."""
 
     torch = _load_torch()
-    if not isinstance(result, LocalTrainingResult):
+    if not isinstance(result, (LocalTrainingResult, PrivateLocalTrainingResult)):
         raise LocalTrainingError("resultado do treinamento local é inválido")
+    expected_update_schema = (
+        PRIVATE_MODEL_UPDATE_SCHEMA_VERSION
+        if isinstance(result, PrivateLocalTrainingResult)
+        else LOCAL_MODEL_UPDATE_SCHEMA_VERSION
+    )
     if (
-        result.update_schema_version != LOCAL_MODEL_UPDATE_SCHEMA_VERSION
+        result.update_schema_version != expected_update_schema
         or result.model_provenance != model_bundle.provenance
     ):
         raise LocalTrainingError("metadados da atualização local são incompatíveis")
@@ -177,7 +186,12 @@ def iter_local_parameter_deltas(
             raise LocalTrainingError("falha ao calcular delta do modelo local") from error
         if not bool(torch.isfinite(delta).all().item()):
             raise LocalTrainingError("atualização local possui delta não finito")
-        yield ParameterDelta(name=name, tensor=delta, numel=delta.numel())
+        yield ParameterDelta(
+            name=name,
+            tensor=delta,
+            numel=delta.numel(),
+            schema_version=expected_update_schema,
+        )
 
 
 __all__ = [

@@ -12,6 +12,8 @@ BASE_MODEL_ID = "Polygl0t/Tucano2-0.6B-Base"
 BASE_MODEL_REVISION = "dad97dc864a8f9a1d240fb9351d098f3af9511d7"
 BASE_RESULT_VARIANT = "upstream_baseline"
 MODEL_ARTIFACT_SCHEMA_VERSION = "tucano2-model-artifact/v1"
+LEGACY_ARTIFACT_CONTRACT_PROFILE = "federated-export-v1"
+QUEROQUERO_ARTIFACT_CONTRACT_PROFILE = "queroquero-export-v1"
 MODEL_LOADING_SCHEMA_VERSION = "tucano2-model-loading/v1"
 DEFAULT_MODEL_CACHE = Path("artifacts/huggingface")
 TRAINING_SEQUENCE_LENGTH = 1_024
@@ -27,6 +29,25 @@ EXPECTED_ATTENTION_HEADS = 16
 EXPECTED_KEY_VALUE_HEADS = 8
 EXPECTED_VOCAB_SIZE = 49_152
 EXPECTED_WEIGHT_DTYPE = "bfloat16"
+QUEROQUERO_ARTIFACT_ID = "ae3238fde6675942cac5"
+QUEROQUERO_ARCHIVE_SHA256 = (
+    "7f523ee9fa73f085ed3cd16ca37c86f45fb2c5aa1b0cff63aab4718c7aa77bc0"
+)
+QUEROQUERO_MANIFEST_SHA256 = (
+    "4b91721b07dc82d47fef2aaf898b4cae2322ca617cd99a2cb903a13965574a48"
+)
+QUEROQUERO_ARTIFACT_SHA256 = (
+    "74046c639049eb76c58696127c469a24ecf8f0637b640d64fa9ab2072f269627"
+)
+QUEROQUERO_WEIGHT_SHA256 = (
+    "3c935258a769c800b89c1c0e4006b45bcef9e470f84d93c7362c3dd79c3cccac"
+)
+QUEROQUERO_TOKENIZER_FILE_FINGERPRINT = (
+    "577ec9987242665aaea00504bc27a28f98c9675039be4ece5ee959934cb42e61"
+)
+QUEROQUERO_TOKENIZER_PREPARED_FINGERPRINT = (
+    "faa35ccd17cec9862cd695770ae9f0820cff297daa48384de8518a60f325a2cd"
+)
 EXPECTED_TOKENIZER_FINGERPRINT = (
     "069e8fecbf6a1e7adc2941a53408306827516f11418998a295e2c4d0e24d3ae7"
 )
@@ -98,6 +119,12 @@ class LocalArtifactModelSpec:
     expected_schema: str
     expected_artifact_sha256: str
     max_sequence_length: int
+    contract_profile: str = LEGACY_ARTIFACT_CONTRACT_PROFILE
+    expected_artifact_id: str | None = None
+    expected_archive_sha256: str | None = None
+    expected_manifest_sha256: str | None = None
+    expected_weight_sha256: str | None = None
+    expected_training_arm: str | None = None
     kind: str = "local_artifact"
 
 
@@ -213,8 +240,15 @@ def parse_model_spec(model_config: Mapping[str, Any]) -> ModelSpec:
         )
 
     if kind == "local_artifact":
-        _require_exact_keys(
-            model_config,
+        contract_profile = model_config.get(
+            "contract_profile", LEGACY_ARTIFACT_CONTRACT_PROFILE
+        )
+        if contract_profile not in {
+            LEGACY_ARTIFACT_CONTRACT_PROFILE,
+            QUEROQUERO_ARTIFACT_CONTRACT_PROFILE,
+        }:
+            raise ModelConfigurationError("model.contract_profile é desconhecido")
+        profile_keys = (
             frozenset(
                 {
                     "kind",
@@ -222,7 +256,26 @@ def parse_model_spec(model_config: Mapping[str, Any]) -> ModelSpec:
                     "expected_artifact_sha256",
                     "max_sequence_length",
                 }
-            ),
+            )
+            if contract_profile == LEGACY_ARTIFACT_CONTRACT_PROFILE
+            else frozenset(
+                {
+                    "kind",
+                    "contract_profile",
+                    "expected_schema",
+                    "expected_artifact_id",
+                    "expected_archive_sha256",
+                    "expected_manifest_sha256",
+                    "expected_artifact_sha256",
+                    "expected_weight_sha256",
+                    "expected_training_arm",
+                    "max_sequence_length",
+                }
+            )
+        )
+        _require_exact_keys(
+            model_config,
+            profile_keys,
             "model",
         )
         expected_schema = _require_string(
@@ -238,12 +291,36 @@ def parse_model_spec(model_config: Mapping[str, Any]) -> ModelSpec:
             raise ModelConfigurationError(
                 "model.expected_artifact_sha256 deve ser SHA-256 em minúsculas"
             )
+        profile_values: dict[str, str | None] = {
+            "expected_artifact_id": None,
+            "expected_archive_sha256": None,
+            "expected_manifest_sha256": None,
+            "expected_weight_sha256": None,
+            "expected_training_arm": None,
+        }
+        if contract_profile == QUEROQUERO_ARTIFACT_CONTRACT_PROFILE:
+            expected_values = {
+                "expected_artifact_id": QUEROQUERO_ARTIFACT_ID,
+                "expected_archive_sha256": QUEROQUERO_ARCHIVE_SHA256,
+                "expected_manifest_sha256": QUEROQUERO_MANIFEST_SHA256,
+                "expected_artifact_sha256": QUEROQUERO_ARTIFACT_SHA256,
+                "expected_weight_sha256": QUEROQUERO_WEIGHT_SHA256,
+                "expected_training_arm": "forum_tech",
+            }
+            for key, expected in expected_values.items():
+                value = _require_string(model_config.get(key), f"model.{key}")
+                if value != expected:
+                    raise ModelConfigurationError(f"model.{key} diverge do artefato fixado")
+                if key in profile_values:
+                    profile_values[key] = value
         return LocalArtifactModelSpec(
             expected_schema=expected_schema,
             expected_artifact_sha256=expected_hash,
             max_sequence_length=_require_sequence_length(
                 model_config["max_sequence_length"]
             ),
+            contract_profile=contract_profile,
+            **profile_values,
         )
 
     raise ModelConfigurationError("model.kind deve ser huggingface ou local_artifact")
@@ -263,14 +340,24 @@ def validate_model_spec(spec: object) -> ModelSpec:
             }
         )
     elif isinstance(spec, LocalArtifactModelSpec):
-        parsed = parse_model_spec(
-            {
-                "kind": spec.kind,
-                "expected_schema": spec.expected_schema,
-                "expected_artifact_sha256": spec.expected_artifact_sha256,
-                "max_sequence_length": spec.max_sequence_length,
-            }
-        )
+        value = {
+            "kind": spec.kind,
+            "expected_schema": spec.expected_schema,
+            "expected_artifact_sha256": spec.expected_artifact_sha256,
+            "max_sequence_length": spec.max_sequence_length,
+        }
+        if spec.contract_profile != LEGACY_ARTIFACT_CONTRACT_PROFILE:
+            value.update(
+                {
+                    "contract_profile": spec.contract_profile,
+                    "expected_artifact_id": spec.expected_artifact_id,
+                    "expected_archive_sha256": spec.expected_archive_sha256,
+                    "expected_manifest_sha256": spec.expected_manifest_sha256,
+                    "expected_weight_sha256": spec.expected_weight_sha256,
+                    "expected_training_arm": spec.expected_training_arm,
+                }
+            )
+        parsed = parse_model_spec(value)
     else:
         raise ModelConfigurationError("spec do modelo possui tipo inválido")
     if parsed != spec:

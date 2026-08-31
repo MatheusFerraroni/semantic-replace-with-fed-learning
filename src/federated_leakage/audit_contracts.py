@@ -22,7 +22,7 @@ AUDIT_TARGET_BUDGET_SCHEMA_VERSION = "audit-target-budget/v1"
 GREEDY_DECODING_STRATEGY = "tokenwise_greedy_argmax/v1"
 ALLOWED_AUDIT_TARGET_COUNTS = (1, 5, 20, 200)
 
-AuditScenario = Literal["B0", "F0", "F1"]
+AuditScenario = Literal["B0", "F0", "F1", "F2", "F3"]
 AuditMode = Literal["primary", "field_specific", "untargeted"]
 
 TARGET_FIELD_TYPES = PROFILE_FIELD_ORDER[1:]
@@ -317,7 +317,7 @@ def validate_extraction_audit_result(result: object) -> ExtractionAuditResult:
     if (
         result.schema_version != EXTRACTION_AUDIT_RESULT_SCHEMA_VERSION
         or result.audit_schema_version != EXTRACTION_AUDIT_SCHEMA_VERSION
-        or result.scenario not in {"B0", "F0", "F1"}
+        or result.scenario not in {"B0", "F0", "F1", "F2", "F3"}
         or type(result.experiment_seed) is not int
         or result.experiment_seed < 0
         or result.generation_count != generation_count
@@ -415,6 +415,7 @@ def parse_extraction_audit_spec(config: Mapping[str, Any]) -> AuditSpec:
         "federated-leakage/main-config/v2",
         "federated-leakage/main-config/v3",
         "federated-leakage/main-config/v4",
+        "federated-leakage/main-config/v5",
     }:
         raise ExtractionAuditError(
             "configuração amostrada legada não pode iniciar nova auditoria"

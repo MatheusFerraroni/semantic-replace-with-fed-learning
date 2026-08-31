@@ -133,6 +133,7 @@ def parse_fedavg_spec(config: Mapping[str, Any]) -> FedAvgSpec:
         "federated-leakage/main-config/v2",
         "federated-leakage/main-config/v3",
         "federated-leakage/main-config/v4",
+        "federated-leakage/main-config/v5",
     }:
         raise FedAvgError("schema da configuração principal é incompatível")
 

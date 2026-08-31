@@ -345,7 +345,7 @@ def _validate_checkpoint(
     if checkpoint.scenario == "B0":
         if checkpoint.round_id != 0 or checkpoint.auxiliary_weight_units is not None:
             raise ExtractionAuditError("checkpoint B0 possui dimensão federada")
-    elif checkpoint.scenario in {"F0", "F1"}:
+    elif checkpoint.scenario in {"F0", "F1", "F2", "F3"}:
         if (
             type(checkpoint.round_id) is not int
             or not 0 <= checkpoint.round_id <= 20
@@ -855,7 +855,7 @@ def score_extraction_audit(
         not isinstance(checkpoint, AuditCheckpoint)
         or checkpoint.schema_version != EXTRACTION_AUDIT_SCHEMA_VERSION
         or checkpoint.experiment_seed != context.experiment_seed
-        or checkpoint.scenario not in {"B0", "F0", "F1"}
+        or checkpoint.scenario not in {"B0", "F0", "F1", "F2", "F3"}
         or not _SHA256_PATTERN.fullmatch(checkpoint.expected_model_sha256)
     ):
         raise ExtractionAuditError("checkpoint de pontuação é inválido")

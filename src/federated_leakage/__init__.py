@@ -280,6 +280,53 @@ from .calibration_checkpointing import (
     load_calibration_checkpoint,
     save_calibration_checkpoint,
 )
+from .dp_accounting import validate_accountant_state, validate_accounting_profile
+from .dp_contracts import (
+    DP_ACCOUNTING_SCHEMA_VERSION,
+    PRIVATE_FEDERATED_ROUND_SCHEMA_VERSION,
+    PRIVATE_LOCAL_TRAINING_SCHEMA_VERSION,
+    PRIVATE_MODEL_UPDATE_SCHEMA_VERSION,
+    DPAccountantState,
+    DPAccountingSpec,
+    PrivateLocalTrainingResult,
+    PrivateTrainingError,
+    load_dp_accounting_spec_from_config,
+)
+from .private_federated_round import (
+    PrivateFederatedRoundResult,
+    run_private_federated_round,
+    validate_paired_private_round_results,
+)
+from .private_training import (
+    PrivateTrainingDiagnosticResult,
+    diagnose_private_local_training,
+    train_private_local_client,
+)
+from .queroquero_artifact import (
+    prepare_queroquero_artifact_archive,
+    validate_queroquero_artifact_directory,
+)
+from .refined_pilot import (
+    preflight_refined_defense_pilot,
+    run_refined_defense_pilot,
+)
+from .refined_pilot_contracts import (
+    REFINED_CHECKPOINT_SCHEMA_VERSION,
+    REFINED_COMBINED_SCHEMA_VERSION,
+    REFINED_PILOT_SCHEMA_VERSION,
+    REFINED_RESULT_SCHEMA_VERSION,
+    REFINED_TRAJECTORY_SCHEMA_VERSION,
+    RefinedDefenseResult,
+    RefinedGatePendingResult,
+    RefinedPilotError,
+    RefinedPilotResult,
+    RefinedPilotSpec,
+    RefinedPreflightResult,
+    RefinedTrajectoryResult,
+    load_refined_pilot_spec_from_config,
+    refined_pilot_result_from_payload,
+)
+from .refined_checkpointing import load_refined_checkpoint, save_refined_checkpoint
 from .calibration_training import train_memorization_calibration_arm
 from .canary_audit import (
     preflight_positive_canary_audit,
@@ -556,4 +603,41 @@ __all__ = [
     "save_calibration_checkpoint",
     "score_positive_canary_audit",
     "train_memorization_calibration_arm",
+    "DP_ACCOUNTING_SCHEMA_VERSION",
+    "PRIVATE_FEDERATED_ROUND_SCHEMA_VERSION",
+    "PRIVATE_LOCAL_TRAINING_SCHEMA_VERSION",
+    "PRIVATE_MODEL_UPDATE_SCHEMA_VERSION",
+    "DPAccountantState",
+    "DPAccountingSpec",
+    "PrivateLocalTrainingResult",
+    "PrivateTrainingDiagnosticResult",
+    "PrivateTrainingError",
+    "PrivateFederatedRoundResult",
+    "load_dp_accounting_spec_from_config",
+    "prepare_queroquero_artifact_archive",
+    "validate_queroquero_artifact_directory",
+    "train_private_local_client",
+    "diagnose_private_local_training",
+    "run_private_federated_round",
+    "validate_paired_private_round_results",
+    "validate_accounting_profile",
+    "validate_accountant_state",
+    "REFINED_CHECKPOINT_SCHEMA_VERSION",
+    "REFINED_COMBINED_SCHEMA_VERSION",
+    "REFINED_PILOT_SCHEMA_VERSION",
+    "REFINED_RESULT_SCHEMA_VERSION",
+    "REFINED_TRAJECTORY_SCHEMA_VERSION",
+    "RefinedGatePendingResult",
+    "RefinedDefenseResult",
+    "RefinedPilotError",
+    "RefinedPilotResult",
+    "RefinedPilotSpec",
+    "RefinedPreflightResult",
+    "RefinedTrajectoryResult",
+    "load_refined_pilot_spec_from_config",
+    "refined_pilot_result_from_payload",
+    "load_refined_checkpoint",
+    "save_refined_checkpoint",
+    "preflight_refined_defense_pilot",
+    "run_refined_defense_pilot",
 ]

@@ -34,6 +34,7 @@ from .model_contracts import (
     EXPECTED_WEIGHT_DTYPE,
     MODEL_ARTIFACT_SCHEMA_VERSION,
     MODEL_LOADING_SCHEMA_VERSION,
+    QUEROQUERO_ARTIFACT_CONTRACT_PROFILE,
     SNAPSHOT_ALLOW_PATTERNS,
     HuggingFaceModelSpec,
     LoadedModelBundle,
@@ -47,6 +48,7 @@ from .model_contracts import (
     parse_model_spec,
     validate_model_spec,
 )
+from .queroquero_artifact import validate_queroquero_artifact_directory
 from .reproducibility import (
     ReproducibilityEnvironmentError,
     validate_cuda_reproducibility_environment,
@@ -100,6 +102,8 @@ def validate_local_artifact(
     """Expõe a validação local usando o conjunto opcional de dependências."""
 
     resolved_dependencies = dependencies or _load_model_dependencies()
+    if spec.contract_profile == QUEROQUERO_ARTIFACT_CONTRACT_PROFILE:
+        return validate_queroquero_artifact_directory(spec, artifact_directory)
     return _validate_local_artifact(
         spec,
         artifact_directory,
@@ -108,7 +112,12 @@ def validate_local_artifact(
     )
 
 
-def _validate_config(config: Any) -> None:
+def _validate_config(
+    config: Any,
+    *,
+    expected_declared_dtype: str = EXPECTED_WEIGHT_DTYPE,
+    allowed_use_cache: tuple[bool, ...] = (False,),
+) -> None:
     expected = {
         "attention_bias": False,
         "attention_dropout": 0.0,
@@ -126,7 +135,6 @@ def _validate_config(config: Any) -> None:
         "rope_scaling": None,
         "rope_theta": 50_000.0,
         "tie_word_embeddings": True,
-        "use_cache": False,
         "vocab_size": EXPECTED_VOCAB_SIZE,
         "max_position_embeddings": EXPECTED_NATIVE_CONTEXT_LENGTH,
         "bos_token_id": EXPECTED_TOKEN_IDS["bos_token_id"],
@@ -135,10 +143,12 @@ def _validate_config(config: Any) -> None:
     }
     if any(getattr(config, key, None) != value for key, value in expected.items()):
         raise ModelLoadError("configuração carregada do modelo é incompatível")
+    if getattr(config, "use_cache", None) not in allowed_use_cache:
+        raise ModelLoadError("política de cache causal declarada é incompatível")
     if tuple(getattr(config, "architectures", ())) != (EXPECTED_ARCHITECTURE,):
         raise ModelLoadError("classe causal declarada é incompatível")
     configured_dtype = str(getattr(config, "torch_dtype", "")).replace("torch.", "")
-    if configured_dtype != EXPECTED_WEIGHT_DTYPE:
+    if configured_dtype != expected_declared_dtype:
         raise ModelLoadError("dtype declarado do modelo é incompatível")
 
 
@@ -165,6 +175,63 @@ def _validate_tokenizer(tokenizer: Any) -> None:
         raise ModelLoadError("lado de padding do tokenizador é incompatível")
     if getattr(tokenizer, "model_max_length", 0) < 1_024:
         raise ModelLoadError("contexto do tokenizador é menor que 1024")
+
+
+def _backend_json(tokenizer: Any) -> Any:
+    backend = getattr(tokenizer, "backend_tokenizer", None)
+    serializer = getattr(backend, "to_str", None)
+    if not callable(serializer):
+        raise ModelLoadError("backend do tokenizador fast está ausente")
+    try:
+        import json
+
+        return json.loads(serializer())
+    except Exception as error:
+        raise ModelLoadError("backend do tokenizador não pode ser normalizado") from error
+
+
+def _validate_refined_tokenizer_equivalence(
+    artifact_directory: Path,
+    reference_directory: Path,
+    dependencies: _ModelDependencies,
+) -> None:
+    arguments = {
+        "local_files_only": True,
+        "trust_remote_code": False,
+        "use_fast": True,
+    }
+    try:
+        artifact = dependencies.transformers.AutoTokenizer.from_pretrained(
+            artifact_directory, **arguments
+        )
+        reference = dependencies.transformers.AutoTokenizer.from_pretrained(
+            reference_directory, **arguments
+        )
+        _validate_tokenizer(artifact)
+        _validate_tokenizer(reference)
+        probes = (
+            "Olá, mundo!",
+            "AÇÃO e informação em português.",
+            "PERSON_NAME: Pessoa Sintética\nCPF: 000.000.000-00",
+            "09:15 2026-12-31 endereço@example.com",
+        )
+        if (
+            artifact.__class__.__name__ != reference.__class__.__name__
+            or artifact.get_vocab() != reference.get_vocab()
+            or _backend_json(artifact) != _backend_json(reference)
+            or any(
+                artifact.encode(value, add_special_tokens=False)
+                != reference.encode(value, add_special_tokens=False)
+                for value in probes
+            )
+        ):
+            raise ModelLoadError(
+                "tokenizador refinado diverge semanticamente do upstream"
+            )
+    except ModelLoadError:
+        raise
+    except Exception as error:
+        raise ModelLoadError("falha ao comparar tokenizadores offline") from error
 
 
 def _resolve_device(torch: Any, requested: str) -> Any:
@@ -226,7 +293,19 @@ def _load_pretrained_directory(
     }
     try:
         config = transformers.AutoConfig.from_pretrained(directory, **common_arguments)
-        _validate_config(config)
+        refined_profile = (
+            isinstance(spec, LocalArtifactModelSpec)
+            and spec.contract_profile == QUEROQUERO_ARTIFACT_CONTRACT_PROFILE
+        )
+        _validate_config(
+            config,
+            expected_declared_dtype=(
+                "float32" if refined_profile else EXPECTED_WEIGHT_DTYPE
+            ),
+            allowed_use_cache=(True,) if refined_profile else (False,),
+        )
+        if refined_profile:
+            config.use_cache = False
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             directory,
             use_fast=True,
@@ -403,6 +482,19 @@ def load_model_bundle(
         model_artifact_dir,
         dependencies=resolved_dependencies,
     )
+    if validated_spec.contract_profile == QUEROQUERO_ARTIFACT_CONTRACT_PROFILE:
+        reference_spec = HuggingFaceModelSpec(
+            model_id=BASE_MODEL_ID,
+            revision=BASE_MODEL_REVISION,
+            result_variant=BASE_RESULT_VARIANT,
+            max_sequence_length=validated_spec.max_sequence_length,
+        )
+        reference = _resolve_cached_snapshot(
+            reference_spec, Path(cache_dir), resolved_dependencies
+        )
+        _validate_refined_tokenizer_equivalence(
+            validated.directory, reference, resolved_dependencies
+        )
     return _load_pretrained_directory(
         validated.directory,
         spec=validated_spec,

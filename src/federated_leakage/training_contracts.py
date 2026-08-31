@@ -169,6 +169,7 @@ def parse_local_training_spec(config: Mapping[str, Any]) -> LocalTrainingSpec:
         "federated-leakage/main-config/v2",
         "federated-leakage/main-config/v3",
         "federated-leakage/main-config/v4",
+        "federated-leakage/main-config/v5",
     }:
         raise LocalTrainingError("schema da configuração principal é incompatível")
     expected_learning_rate = (
@@ -176,6 +177,7 @@ def parse_local_training_spec(config: Mapping[str, Any]) -> LocalTrainingSpec:
         if main_schema_version in {
             "federated-leakage/main-config/v3",
             "federated-leakage/main-config/v4",
+            "federated-leakage/main-config/v5",
         }
         else 1e-5
     )

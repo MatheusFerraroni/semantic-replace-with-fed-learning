@@ -16,6 +16,11 @@ from .aggregation_contracts import (
     validate_fedavg_spec,
 )
 from .model_contracts import LoadedModelBundle, ModelProvenance
+from .dp_contracts import (
+    PRIVATE_LOCAL_TRAINING_SCHEMA_VERSION,
+    PRIVATE_MODEL_UPDATE_SCHEMA_VERSION,
+    PrivateLocalTrainingResult,
+)
 from .model_fingerprint import fingerprint_named_tensors
 from .model_updates import (
     _validate_model_parameters,
@@ -253,8 +258,38 @@ class FedAvgAccumulator:
             self.abort()
 
     def _validate_result(
-        self, result: LocalTrainingResult, weight: FedAvgClientWeight
+        self,
+        result: LocalTrainingResult | PrivateLocalTrainingResult,
+        weight: FedAvgClientWeight,
     ) -> None:
+        if isinstance(result, PrivateLocalTrainingResult):
+            if (
+                weight.role != "victim"
+                or result.schema_version != PRIVATE_LOCAL_TRAINING_SCHEMA_VERSION
+                or result.update_schema_version != PRIVATE_MODEL_UPDATE_SCHEMA_VERSION
+                or result.client_id != weight.client_id
+                or result.role != "victim"
+                or result.round_id != self._round_id
+                or result.model_provenance != self._model_provenance
+                or result.conversation_count != 100
+                or result.optimizer_steps
+                != self._expected_optimizer_steps[weight.client_id]
+                or result.accountant_steps_total != self._round_id * 100
+                or result.sampled_conversation_count < 0
+                or not math.isfinite(result.realized_epsilon)
+                or result.realized_epsilon <= 0
+                or any(
+                    not _is_sha256(value)
+                    for value in (
+                        result.sample_schedule_sha256,
+                        result.noise_schedule_sha256,
+                        result.training_seed_sha256,
+                        result.accountant_state_sha256,
+                    )
+                )
+            ):
+                raise FedAvgError("recibo privado diverge do cliente esperado")
+            return
         if not isinstance(result, LocalTrainingResult):
             raise FedAvgError("resultado local do acumulador é inválido")
         if (
@@ -284,14 +319,18 @@ class FedAvgAccumulator:
             raise FedAvgError("resultado local diverge do cliente esperado")
 
     def _validate_delta(
-        self, delta: ParameterDelta, parameter_index: int
+        self,
+        delta: ParameterDelta,
+        parameter_index: int,
+        *,
+        expected_schema: str,
     ) -> None:
         torch = _load_torch()
         expected_tensor = self._snapshot.parameters[parameter_index]
         if not isinstance(delta, ParameterDelta):
             raise FedAvgError("fluxo local contém delta inválido")
         if (
-            delta.schema_version != LOCAL_MODEL_UPDATE_SCHEMA_VERSION
+            delta.schema_version != expected_schema
             or delta.name != self._snapshot.parameter_names[parameter_index]
             or delta.numel != expected_tensor.numel()
             or not isinstance(delta.tensor, torch.Tensor)
@@ -304,7 +343,7 @@ class FedAvgAccumulator:
 
     def add_client_update(
         self,
-        result: LocalTrainingResult,
+        result: LocalTrainingResult | PrivateLocalTrainingResult,
         deltas: Iterator[ParameterDelta],
     ) -> None:
         """Consome integralmente um cliente antes que o modelo seja restaurado."""
@@ -317,6 +356,11 @@ class FedAvgAccumulator:
         weight = self._weights[self._client_index]
         try:
             self._validate_result(result, weight)
+            expected_delta_schema = (
+                PRIVATE_MODEL_UPDATE_SCHEMA_VERSION
+                if isinstance(result, PrivateLocalTrainingResult)
+                else LOCAL_MODEL_UPDATE_SCHEMA_VERSION
+            )
             iterator = iter(deltas)
             for parameter_index in range(len(self._snapshot.parameters)):
                 try:
@@ -325,7 +369,11 @@ class FedAvgAccumulator:
                     raise FedAvgError(
                         "atualização local possui parâmetros ausentes"
                     ) from error
-                self._validate_delta(delta, parameter_index)
+                self._validate_delta(
+                    delta,
+                    parameter_index,
+                    expected_schema=expected_delta_schema,
+                )
                 if self._client_index == 0:
                     weighted = delta.tensor.clone()
                     weighted.mul_(weight.value)

@@ -22,6 +22,9 @@ model = [
   "torch==2.7.1",
   "transformers==4.53.2",
 ]
+dp = [
+  "opacus==1.6.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
