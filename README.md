@@ -307,7 +307,11 @@ upstream pinado com a mesma versão de runtime. Como o metadado
 não o entrega ao `AutoTokenizer`: ele carrega `tokenizer.json` diretamente com
 `tokenizers`, compara backend, vocabulário e probes de codificação/decodificação
 ao snapshot pinado e usa o fast tokenizer upstream já validado. Os pesos FP32 do
-export são carregados diretamente como BF16 e atenção eager, sem fallback.
+export são carregados diretamente como BF16 e atenção eager, sem fallback. O
+dialeto do `config.json` do Transformers 5.14.1 é validado integralmente; em
+memória, `dtype=float32` e `rope_parameters.rope_theta=50000` são traduzidos
+explicitamente para os atributos equivalentes do Transformers 4.53.2 antes da
+carga.
 
 ## Tokenizar conversas para treinamento
 

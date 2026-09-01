@@ -57,6 +57,40 @@ from .reproducibility import (
 )
 
 
+_EXPECTED_QUEROQUERO_RAW_CONFIG = {
+    "architectures": [EXPECTED_ARCHITECTURE],
+    "attention_bias": False,
+    "attention_dropout": 0.0,
+    "bos_token_id": EXPECTED_TOKEN_IDS["bos_token_id"],
+    "dtype": "float32",
+    "eos_token_id": EXPECTED_TOKEN_IDS["eos_token_id"],
+    "head_dim": 96,
+    "hidden_act": "silu",
+    "hidden_size": EXPECTED_HIDDEN_SIZE,
+    "initializer_range": 0.02,
+    "intermediate_size": EXPECTED_INTERMEDIATE_SIZE,
+    "is_llama_config": True,
+    "max_position_embeddings": EXPECTED_NATIVE_CONTEXT_LENGTH,
+    "mlp_bias": False,
+    "model_type": EXPECTED_MODEL_TYPE,
+    "num_attention_heads": EXPECTED_ATTENTION_HEADS,
+    "num_hidden_layers": EXPECTED_HIDDEN_LAYERS,
+    "num_key_value_heads": EXPECTED_KEY_VALUE_HEADS,
+    "pad_token_id": EXPECTED_TOKEN_IDS["pad_token_id"],
+    "pretraining_tp": 1,
+    "rms_norm_eps": 1e-6,
+    "rope_interleaved": False,
+    "rope_parameters": {
+        "rope_theta": 50_000.0,
+        "rope_type": "default",
+    },
+    "tie_word_embeddings": True,
+    "transformers_version": "5.14.1",
+    "use_cache": True,
+    "vocab_size": EXPECTED_VOCAB_SIZE,
+}
+
+
 def load_model_spec_from_config(path: Path) -> ModelSpec:
     """Carrega somente a seção pública `model` de um YAML."""
 
@@ -201,6 +235,40 @@ def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
                 "configuração do tokenizador refinado possui chave duplicada"
             )
         value[key] = item
+    return value
+
+
+def _strict_refined_model_config_object(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ModelLoadError(
+                "configuração do modelo refinado possui chave duplicada"
+            )
+        value[key] = item
+    return value
+
+
+def _load_refined_model_config(artifact_directory: Path) -> Mapping[str, Any]:
+    path = Path(artifact_directory) / "config.json"
+    try:
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+            raise ModelLoadError("configuração bruta do modelo refinado é inválida")
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_strict_refined_model_config_object,
+        )
+    except ModelLoadError:
+        raise
+    except Exception as error:
+        raise ModelLoadError(
+            "configuração bruta do modelo refinado não pode ser validada"
+        ) from error
+    if not isinstance(value, Mapping) or value != _EXPECTED_QUEROQUERO_RAW_CONFIG:
+        raise ModelLoadError("dialeto da configuração do modelo refinado diverge")
     return value
 
 
@@ -421,11 +489,17 @@ def _load_pretrained_directory(
         "trust_remote_code": False,
     }
     try:
-        config = transformers.AutoConfig.from_pretrained(directory, **common_arguments)
         refined_profile = (
             isinstance(spec, LocalArtifactModelSpec)
             and spec.contract_profile == QUEROQUERO_ARTIFACT_CONTRACT_PROFILE
         )
+        refined_raw_config = (
+            _load_refined_model_config(directory) if refined_profile else None
+        )
+        config = transformers.AutoConfig.from_pretrained(directory, **common_arguments)
+        if refined_raw_config is not None:
+            config.rope_theta = refined_raw_config["rope_parameters"]["rope_theta"]
+            config.torch_dtype = torch.float32
         _validate_config(
             config,
             expected_declared_dtype=(

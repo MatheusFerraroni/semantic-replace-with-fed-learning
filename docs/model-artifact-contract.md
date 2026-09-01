@@ -227,6 +227,13 @@ versão fixada do Transformers, com `safetensors`, atenção eager, código remo
 desabilitado e sem fallback. O modelo em memória continua sujeito à assinatura
 BF16 da tabela anterior.
 
+O `config.json` foi exportado pelo Transformers 5.14.1 e declara `dtype` e
+`rope_parameters`. O consumidor 4.53.2 valida o objeto completo antes de
+traduzir, somente em memória, `dtype=float32` para `torch_dtype=float32` e
+`rope_parameters.rope_theta=50000` para `rope_theta=50000`. Sem essa tradução,
+o runtime antigo adotaria incorretamente o RoPE padrão `10000`; qualquer outro
+dialeto ou valor é rejeitado.
+
 O manifesto declara os fingerprints de tokenizador
 `577ec9987242665aaea00504bc27a28f98c9675039be4ece5ee959934cb42e61`
 e `faa35ccd17cec9862cd695770ae9f0820cff297daa48384de8518a60f325a2cd`.

@@ -248,6 +248,7 @@ def _write_refined_tokenizer_files(root: Path, **overrides) -> None:
 
 class _FakeTorch:
     bfloat16 = object()
+    float32 = "float32"
     cuda = SimpleNamespace(is_available=lambda: False)
     backends = SimpleNamespace(mps=SimpleNamespace(is_available=lambda: False))
 
@@ -859,9 +860,14 @@ class ModelLoadingTests(unittest.TestCase):
     def test_prevalidated_tokenizer_avoids_transformers_artifact_dispatch(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
+            (root / "config.json").write_text(
+                json.dumps(model_loading._EXPECTED_QUEROQUERO_RAW_CONFIG),
+                encoding="utf-8",
+            )
             dependencies = _fake_dependencies(root)
             config = _fake_config()
-            config.torch_dtype = "float32"
+            config.rope_theta = 10_000.0
+            config.torch_dtype = None
             config.use_cache = True
             dependencies.transformers.AutoConfig.from_pretrained.return_value = config
             tokenizer = _FakeTokenizer()
@@ -883,8 +889,24 @@ class ModelLoadingTests(unittest.TestCase):
 
         self.assertIs(bundle.tokenizer, tokenizer)
         self.assertFalse(config.use_cache)
+        self.assertEqual(config.rope_theta, 50_000.0)
+        self.assertEqual(config.torch_dtype, _FakeTorch.float32)
         dependencies.transformers.AutoTokenizer.from_pretrained.assert_not_called()
         dependencies.transformers.AutoModelForCausalLM.from_pretrained.assert_called_once()
+
+    def test_refined_model_config_dialect_is_strict_before_translation(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            value = json.loads(
+                json.dumps(model_loading._EXPECTED_QUEROQUERO_RAW_CONFIG)
+            )
+            value["rope_parameters"]["rope_theta"] = 10_000.0
+            (root / "config.json").write_text(
+                json.dumps(value),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ModelLoadError, "dialeto"):
+                model_loading._load_refined_model_config(root)
 
 
 if __name__ == "__main__":

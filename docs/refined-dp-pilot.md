@@ -85,6 +85,11 @@ bruto contra o snapshot upstream pinado e somente então usa o fast tokenizer
 upstream equivalente. Divergência de backend, vocabulário ou probes interrompe o
 smoke antes do treinamento privado.
 
+O `config.json` também usa o dialeto do Transformers 5.14.1. Após validar o
+objeto completo, o loader traduz em memória `dtype` e `rope_parameters` para os
+atributos equivalentes do runtime 4.53.2, preservando FP32 declarado e
+`rope_theta=50000`; nenhuma outra configuração recebe fallback.
+
 ## Slurm e retomada
 
 Execute primeiro os preflights:
