@@ -320,8 +320,7 @@ def _validate_refined_tokenizer_equivalence(
         artifact_vocab = artifact.get_vocab(with_added_tokens=True)
         reference_raw_vocab = reference_raw.get_vocab(with_added_tokens=True)
         artifact_backend = json.loads(artifact.to_str())
-        reference_raw_backend = json.loads(reference_raw.to_str())
-        _backend_json(reference)
+        reference_backend = _backend_json(reference)
         for value in probes:
             artifact_ids = artifact.encode(value, add_special_tokens=False).ids
             reference_raw_ids = reference_raw.encode(
@@ -358,7 +357,7 @@ def _validate_refined_tokenizer_equivalence(
         ) from error
     if artifact_vocab != reference_raw_vocab or artifact_vocab != reference.get_vocab():
         raise ModelLoadError("vocabulário do tokenizador refinado diverge do upstream")
-    if artifact_backend != reference_raw_backend:
+    if artifact_backend != reference_backend:
         raise ModelLoadError("backend do tokenizador refinado diverge do upstream")
     return reference
 

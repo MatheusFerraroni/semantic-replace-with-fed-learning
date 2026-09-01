@@ -690,10 +690,18 @@ class ModelLoadingTests(unittest.TestCase):
             reference.mkdir()
             _write_refined_tokenizer_files(artifact)
             (reference / "tokenizer.json").write_text("{}", encoding="utf-8")
-            raw = _FakeRawTokenizer()
-            runtime_tokenizer = _ComparableFakeTokenizer(raw)
+            artifact_raw = _FakeRawTokenizer(
+                backend={"added_tokens": [{"id": 49148, "special": True}]}
+            )
+            reference_raw = _FakeRawTokenizer(
+                backend={"added_tokens": [{"id": 49148, "special": False}]}
+            )
+            runtime_raw = _FakeRawTokenizer(
+                backend={"added_tokens": [{"id": 49148, "special": True}]}
+            )
+            runtime_tokenizer = _ComparableFakeTokenizer(runtime_raw)
             dependencies = _fake_dependencies(reference)
-            from_file = mock.Mock(return_value=raw)
+            from_file = mock.Mock(side_effect=(artifact_raw, reference_raw))
             dependencies.tokenizers.Tokenizer.from_file = from_file
             dependencies.transformers.AutoTokenizer.from_pretrained.return_value = (
                 runtime_tokenizer
