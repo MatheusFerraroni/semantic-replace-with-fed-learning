@@ -302,8 +302,12 @@ O destino canônico é
 `artifacts/models/ae3238fde6675942cac5/`, ignorado pelo Git. A preparação exige
 ZIP, manifesto, inventário e pesos exatos, publica por renomeação atômica e
 recusa sobrescrita. Na carga, o tokenizador local é comparado ao snapshot
-upstream pinado com a mesma versão de runtime. Os pesos FP32 do export são
-carregados diretamente como BF16 e atenção eager, sem fallback.
+upstream pinado com a mesma versão de runtime. Como o metadado
+`tokenizer_class=TokenizersBackend` pertence ao runtime do produtor, o consumidor
+não o entrega ao `AutoTokenizer`: ele carrega `tokenizer.json` diretamente com
+`tokenizers`, compara backend, vocabulário e probes de codificação/decodificação
+ao snapshot pinado e usa o fast tokenizer upstream já validado. Os pesos FP32 do
+export são carregados diretamente como BF16 e atenção eager, sem fallback.
 
 ## Tokenizar conversas para treinamento
 

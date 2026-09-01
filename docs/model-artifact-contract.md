@@ -231,9 +231,13 @@ O manifesto declara os fingerprints de tokenizador
 `577ec9987242665aaea00504bc27a28f98c9675039be4ece5ee959934cb42e61`
 e `faa35ccd17cec9862cd695770ae9f0820cff297daa48384de8518a60f325a2cd`.
 Além de validar esses valores e os hashes dos arquivos, o consumidor carrega o
-tokenizador local e o upstream pinado com a mesma versão de runtime e compara
-classe, vocabulário completo, backend normalizado, IDs, tokens especiais e
-codificações determinísticas.
+`tokenizer.json` local diretamente pelo pacote `tokenizers` e o tokenizador
+upstream pinado pelo Transformers na mesma versão de runtime. O valor produtor
+`tokenizer_class=TokenizersBackend` é validado como metadado, mas não é usado
+para despacho no Transformers 4.53.2. Backend normalizado, vocabulário completo,
+IDs, tokens especiais e probes determinísticos de codificação e decodificação
+devem coincidir; depois dessa equivalência, o fast tokenizer upstream validado é
+o tokenizador operacional do bundle.
 
 O ZIP é preparado por
 `python -m federated_leakage.prepare_refined_artifact`; travessia, links,

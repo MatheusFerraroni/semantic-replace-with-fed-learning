@@ -79,6 +79,12 @@ python -m federated_leakage.smoke_private_training \
 Ambos restauram o modelo e mostram `escrita: nao`. O modo `hooks` é obrigatório;
 OOM ou incompatibilidade interrompem a execução sem fallback.
 
+O export declara `tokenizer_class=TokenizersBackend`, uma classe do runtime do
+produtor. O consumidor não instancia essa classe: valida o `tokenizer.json`
+bruto contra o snapshot upstream pinado e somente então usa o fast tokenizer
+upstream equivalente. Divergência de backend, vocabulário ou probes interrompe o
+smoke antes do treinamento privado.
+
 ## Slurm e retomada
 
 Execute primeiro os preflights:

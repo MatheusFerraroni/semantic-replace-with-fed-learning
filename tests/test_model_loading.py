@@ -161,6 +161,91 @@ class _FakeTokenizer:
         return list(token_ids)
 
 
+class _FakeEncoding:
+    def __init__(self, ids):
+        self.ids = list(ids)
+
+
+class _FakeRawTokenizer:
+    def __init__(self, *, vocabulary=None, backend=None, encoding_suffix=()):
+        self.vocabulary = vocabulary or {"<|unk|>": 0, "teste": 10}
+        self.backend = backend or {"model": {"type": "BPE"}}
+        self.encoding_suffix = tuple(encoding_suffix)
+
+    def get_vocab(self, *, with_added_tokens):
+        if not with_added_tokens:
+            raise AssertionError("a comparação deve incluir tokens adicionados")
+        return dict(self.vocabulary)
+
+    def to_str(self):
+        return json.dumps(self.backend, sort_keys=True)
+
+    def encode(self, value, *, add_special_tokens):
+        if add_special_tokens:
+            raise AssertionError("probes não podem adicionar tokens especiais")
+        return _FakeEncoding(
+            [ord(character) for character in value] + list(self.encoding_suffix)
+        )
+
+    def decode(self, ids, *, skip_special_tokens):
+        if skip_special_tokens:
+            raise AssertionError("a comparação não pode remover tokens especiais")
+        return "".join(chr(token_id) for token_id in ids if token_id <= 0x10FFFF)
+
+
+class _ComparableFakeTokenizer(_FakeTokenizer):
+    def __init__(self, raw):
+        self.backend_tokenizer = raw
+
+    def get_vocab(self):
+        return self.backend_tokenizer.get_vocab(with_added_tokens=True)
+
+    def encode(self, value, *, add_special_tokens):
+        return self.backend_tokenizer.encode(
+            value,
+            add_special_tokens=add_special_tokens,
+        ).ids
+
+    def decode(
+        self,
+        ids,
+        *,
+        skip_special_tokens,
+        clean_up_tokenization_spaces,
+    ):
+        if clean_up_tokenization_spaces:
+            raise AssertionError("a comparação não pode limpar espaços")
+        return self.backend_tokenizer.decode(
+            ids,
+            skip_special_tokens=skip_special_tokens,
+        )
+
+
+def _write_refined_tokenizer_files(root: Path, **overrides) -> None:
+    config = {
+        "backend": "tokenizers",
+        "tokenizer_class": "TokenizersBackend",
+        "bos_token": "<|im_start|>",
+        "eos_token": "<|im_end|>",
+        "pad_token": "<|pad|>",
+        "unk_token": "<|unk|>",
+        "bos_token_id": 1,
+        "eos_token_id": 2,
+        "pad_token_id": 49109,
+        "unk_token_id": 0,
+        "model_max_length": 4096,
+        "padding_side": "right",
+        "truncation_side": "right",
+        "clean_up_tokenization_spaces": False,
+    }
+    config.update(overrides)
+    (root / "tokenizer_config.json").write_text(
+        json.dumps(config),
+        encoding="utf-8",
+    )
+    (root / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+
 class _FakeTorch:
     bfloat16 = object()
     cuda = SimpleNamespace(is_available=lambda: False)
@@ -217,6 +302,7 @@ def _fake_dependencies(snapshot_path: Path):
     return model_loading._ModelDependencies(
         torch=_FakeTorch,
         transformers=transformers,
+        tokenizers=SimpleNamespace(Tokenizer=SimpleNamespace()),
         snapshot_download=mock.Mock(return_value=str(snapshot_path)),
         jsonschema=jsonschema,
     )
@@ -594,6 +680,131 @@ class ModelLoadingTests(unittest.TestCase):
                 )
         dependencies.transformers.AutoConfig.from_pretrained.assert_not_called()
         dependencies.transformers.AutoModelForCausalLM.from_pretrained.assert_not_called()
+
+    def test_refined_tokenizer_uses_raw_backend_and_returns_upstream_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            artifact = root / "artifact"
+            reference = root / "reference"
+            artifact.mkdir()
+            reference.mkdir()
+            _write_refined_tokenizer_files(artifact)
+            (reference / "tokenizer.json").write_text("{}", encoding="utf-8")
+            raw = _FakeRawTokenizer()
+            runtime_tokenizer = _ComparableFakeTokenizer(raw)
+            dependencies = _fake_dependencies(reference)
+            from_file = mock.Mock(return_value=raw)
+            dependencies.tokenizers.Tokenizer.from_file = from_file
+            dependencies.transformers.AutoTokenizer.from_pretrained.return_value = (
+                runtime_tokenizer
+            )
+
+            validated = model_loading._validate_refined_tokenizer_equivalence(
+                artifact,
+                reference,
+                dependencies,
+            )
+
+        self.assertIs(validated, runtime_tokenizer)
+        self.assertEqual(
+            from_file.call_args_list,
+            [
+                mock.call(str(artifact / "tokenizer.json")),
+                mock.call(str(reference / "tokenizer.json")),
+            ],
+        )
+        dependencies.transformers.AutoTokenizer.from_pretrained.assert_called_once_with(
+            reference,
+            local_files_only=True,
+            trust_remote_code=False,
+            use_fast=True,
+        )
+
+    def test_refined_tokenizer_rejects_producer_metadata_and_semantic_drift(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            artifact = root / "artifact"
+            reference = root / "reference"
+            artifact.mkdir()
+            reference.mkdir()
+            (reference / "tokenizer.json").write_text("{}", encoding="utf-8")
+            raw = _FakeRawTokenizer()
+            runtime_tokenizer = _ComparableFakeTokenizer(raw)
+            dependencies = _fake_dependencies(reference)
+            dependencies.tokenizers.Tokenizer.from_file = mock.Mock(return_value=raw)
+            dependencies.transformers.AutoTokenizer.from_pretrained.return_value = (
+                runtime_tokenizer
+            )
+
+            _write_refined_tokenizer_files(
+                artifact,
+                tokenizer_class="classe-arbitraria",
+            )
+            with self.assertRaisesRegex(ModelLoadError, "configuração semântica"):
+                model_loading._validate_refined_tokenizer_equivalence(
+                    artifact,
+                    reference,
+                    dependencies,
+                )
+            dependencies.tokenizers.Tokenizer.from_file.assert_not_called()
+            dependencies.transformers.AutoTokenizer.from_pretrained.assert_not_called()
+
+            _write_refined_tokenizer_files(artifact)
+            divergences = (
+                (
+                    "vocabulário",
+                    _FakeRawTokenizer(vocabulary={"divergente": 99}),
+                ),
+                (
+                    "backend",
+                    _FakeRawTokenizer(backend={"model": {"type": "WordPiece"}}),
+                ),
+                (
+                    "codificação",
+                    _FakeRawTokenizer(encoding_suffix=(999,)),
+                ),
+            )
+            for expected_error, artifact_raw in divergences:
+                with self.subTest(expected_error=expected_error):
+                    dependencies.tokenizers.Tokenizer.from_file = mock.Mock(
+                        side_effect=(artifact_raw, raw)
+                    )
+                    with self.assertRaisesRegex(ModelLoadError, expected_error):
+                        model_loading._validate_refined_tokenizer_equivalence(
+                            artifact,
+                            reference,
+                            dependencies,
+                        )
+
+    def test_prevalidated_tokenizer_avoids_transformers_artifact_dispatch(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            dependencies = _fake_dependencies(root)
+            config = _fake_config()
+            config.torch_dtype = "float32"
+            config.use_cache = True
+            dependencies.transformers.AutoConfig.from_pretrained.return_value = config
+            tokenizer = _FakeTokenizer()
+            spec = LocalArtifactModelSpec(
+                expected_schema="tucano2-model-artifact/v1",
+                expected_artifact_sha256="a" * 64,
+                max_sequence_length=1024,
+                contract_profile="queroquero-export-v1",
+            )
+            bundle = model_loading._load_pretrained_directory(
+                root,
+                spec=spec,
+                device="cpu",
+                tokenizer_fingerprint=EXPECTED_TOKENIZER_FINGERPRINT,
+                artifact_manifest={"artifact_id": "refined-test"},
+                dependencies=dependencies,
+                prevalidated_tokenizer=tokenizer,
+            )
+
+        self.assertIs(bundle.tokenizer, tokenizer)
+        self.assertFalse(config.use_cache)
+        dependencies.transformers.AutoTokenizer.from_pretrained.assert_not_called()
+        dependencies.transformers.AutoModelForCausalLM.from_pretrained.assert_called_once()
 
 
 if __name__ == "__main__":

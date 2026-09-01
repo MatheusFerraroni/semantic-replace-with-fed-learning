@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -71,6 +73,7 @@ def load_model_spec_from_config(path: Path) -> ModelSpec:
 class _ModelDependencies:
     torch: Any
     transformers: Any
+    tokenizers: Any
     snapshot_download: Any
     jsonschema: Any
 
@@ -78,6 +81,7 @@ class _ModelDependencies:
 def _load_model_dependencies() -> _ModelDependencies:
     try:
         import jsonschema
+        import tokenizers
         import torch
         import transformers
         from huggingface_hub import snapshot_download
@@ -88,6 +92,7 @@ def _load_model_dependencies() -> _ModelDependencies:
     return _ModelDependencies(
         torch=torch,
         transformers=transformers,
+        tokenizers=tokenizers,
         snapshot_download=snapshot_download,
         jsonschema=jsonschema,
     )
@@ -183,55 +188,171 @@ def _backend_json(tokenizer: Any) -> Any:
     if not callable(serializer):
         raise ModelLoadError("backend do tokenizador fast está ausente")
     try:
-        import json
-
         return json.loads(serializer())
     except Exception as error:
         raise ModelLoadError("backend do tokenizador não pode ser normalizado") from error
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ModelLoadError(
+                "configuração do tokenizador refinado possui chave duplicada"
+            )
+        value[key] = item
+    return value
+
+
+def _validate_refined_tokenizer_config(artifact_directory: Path) -> None:
+    path = Path(artifact_directory) / "tokenizer_config.json"
+    try:
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+            raise ModelLoadError("configuração do tokenizador refinado é inválida")
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_strict_json_object,
+        )
+    except ModelLoadError:
+        raise
+    except Exception as error:
+        raise ModelLoadError(
+            "configuração do tokenizador refinado não pode ser validada"
+        ) from error
+    expected = {
+        "backend": "tokenizers",
+        "tokenizer_class": "TokenizersBackend",
+        "bos_token": EXPECTED_TOKEN_TEXT["bos_token"],
+        "eos_token": EXPECTED_TOKEN_TEXT["eos_token"],
+        "pad_token": EXPECTED_TOKEN_TEXT["pad_token"],
+        "unk_token": EXPECTED_TOKEN_TEXT["unk_token"],
+        "bos_token_id": EXPECTED_TOKEN_IDS["bos_token_id"],
+        "eos_token_id": EXPECTED_TOKEN_IDS["eos_token_id"],
+        "pad_token_id": EXPECTED_TOKEN_IDS["pad_token_id"],
+        "unk_token_id": EXPECTED_TOKEN_IDS["unk_token_id"],
+        "model_max_length": EXPECTED_NATIVE_CONTEXT_LENGTH,
+        "padding_side": "right",
+        "truncation_side": "right",
+        "clean_up_tokenization_spaces": False,
+    }
+    if not isinstance(value, Mapping) or any(
+        value.get(key) != expected_value for key, expected_value in expected.items()
+    ):
+        raise ModelLoadError(
+            "configuração semântica do tokenizador refinado diverge"
+        )
+
+
+def _load_raw_tokenizer_backend(
+    directory: Path,
+    dependencies: _ModelDependencies,
+    *,
+    source: str,
+) -> Any:
+    if source not in {"refined", "upstream"}:
+        raise ValueError("origem interna do tokenizador é inválida")
+    source_label = "refinado" if source == "refined" else "upstream pinado"
+    path = Path(directory) / "tokenizer.json"
+    try:
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+            raise ModelLoadError(
+                f"backend bruto do tokenizador {source_label} é inválido"
+            )
+        backend = dependencies.tokenizers.Tokenizer.from_file(str(path))
+        json.loads(backend.to_str())
+        return backend
+    except ModelLoadError:
+        raise
+    except Exception as error:
+        raise ModelLoadError(
+            f"backend bruto do tokenizador {source_label} é incompatível "
+            "com o runtime fixado"
+        ) from error
 
 
 def _validate_refined_tokenizer_equivalence(
     artifact_directory: Path,
     reference_directory: Path,
     dependencies: _ModelDependencies,
-) -> None:
+) -> Any:
     arguments = {
         "local_files_only": True,
         "trust_remote_code": False,
         "use_fast": True,
     }
+    _validate_refined_tokenizer_config(artifact_directory)
+    artifact = _load_raw_tokenizer_backend(
+        artifact_directory,
+        dependencies,
+        source="refined",
+    )
+    reference_raw = _load_raw_tokenizer_backend(
+        reference_directory,
+        dependencies,
+        source="upstream",
+    )
     try:
-        artifact = dependencies.transformers.AutoTokenizer.from_pretrained(
-            artifact_directory, **arguments
-        )
         reference = dependencies.transformers.AutoTokenizer.from_pretrained(
             reference_directory, **arguments
         )
-        _validate_tokenizer(artifact)
-        _validate_tokenizer(reference)
-        probes = (
-            "Olá, mundo!",
-            "AÇÃO e informação em português.",
-            "PERSON_NAME: Pessoa Sintética\nCPF: 000.000.000-00",
-            "09:15 2026-12-31 endereço@example.com",
-        )
-        if (
-            artifact.__class__.__name__ != reference.__class__.__name__
-            or artifact.get_vocab() != reference.get_vocab()
-            or _backend_json(artifact) != _backend_json(reference)
-            or any(
-                artifact.encode(value, add_special_tokens=False)
-                != reference.encode(value, add_special_tokens=False)
-                for value in probes
+    except Exception as error:
+        raise ModelLoadError(
+            "tokenizador upstream pinado não pode ser carregado offline"
+        ) from error
+    _validate_tokenizer(reference)
+    probes = (
+        "Olá, mundo!",
+        "AÇÃO e informação em português.",
+        "PERSON_NAME: Pessoa Sintética\nCPF: 000.000.000-00",
+        "09:15 2026-12-31 endereço@example.com",
+    )
+    try:
+        artifact_vocab = artifact.get_vocab(with_added_tokens=True)
+        reference_raw_vocab = reference_raw.get_vocab(with_added_tokens=True)
+        artifact_backend = json.loads(artifact.to_str())
+        reference_raw_backend = json.loads(reference_raw.to_str())
+        _backend_json(reference)
+        for value in probes:
+            artifact_ids = artifact.encode(value, add_special_tokens=False).ids
+            reference_raw_ids = reference_raw.encode(
+                value,
+                add_special_tokens=False,
+            ).ids
+            reference_ids = reference.encode(value, add_special_tokens=False)
+            if artifact_ids != reference_raw_ids or artifact_ids != reference_ids:
+                raise ModelLoadError(
+                    "codificação do tokenizador refinado diverge do upstream"
+                )
+            artifact_text = artifact.decode(
+                artifact_ids,
+                skip_special_tokens=False,
             )
-        ):
-            raise ModelLoadError(
-                "tokenizador refinado diverge semanticamente do upstream"
+            reference_text = reference.decode(
+                reference_ids,
+                skip_special_tokens=False,
+                clean_up_tokenization_spaces=False,
             )
+            reference_raw_text = reference_raw.decode(
+                reference_raw_ids,
+                skip_special_tokens=False,
+            )
+            if artifact_text != reference_raw_text or artifact_text != reference_text:
+                raise ModelLoadError(
+                    "decodificação do tokenizador refinado diverge do upstream"
+                )
     except ModelLoadError:
         raise
     except Exception as error:
-        raise ModelLoadError("falha ao comparar tokenizadores offline") from error
+        raise ModelLoadError(
+            "backend do tokenizador refinado não pôde ser comparado"
+        ) from error
+    if artifact_vocab != reference_raw_vocab or artifact_vocab != reference.get_vocab():
+        raise ModelLoadError("vocabulário do tokenizador refinado diverge do upstream")
+    if artifact_backend != reference_raw_backend:
+        raise ModelLoadError("backend do tokenizador refinado diverge do upstream")
+    return reference
 
 
 def _resolve_device(torch: Any, requested: str) -> Any:
@@ -283,6 +404,7 @@ def _load_pretrained_directory(
     tokenizer_fingerprint: str,
     artifact_manifest: Mapping[str, Any] | None,
     dependencies: _ModelDependencies,
+    prevalidated_tokenizer: Any | None = None,
 ) -> LoadedModelBundle:
     torch = dependencies.torch
     transformers = dependencies.transformers
@@ -306,11 +428,13 @@ def _load_pretrained_directory(
         )
         if refined_profile:
             config.use_cache = False
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            directory,
-            use_fast=True,
-            **common_arguments,
-        )
+        tokenizer = prevalidated_tokenizer
+        if tokenizer is None:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                directory,
+                use_fast=True,
+                **common_arguments,
+            )
         _validate_tokenizer(tokenizer)
         model = transformers.AutoModelForCausalLM.from_pretrained(
             directory,
@@ -482,6 +606,7 @@ def load_model_bundle(
         model_artifact_dir,
         dependencies=resolved_dependencies,
     )
+    refined_tokenizer = None
     if validated_spec.contract_profile == QUEROQUERO_ARTIFACT_CONTRACT_PROFILE:
         reference_spec = HuggingFaceModelSpec(
             model_id=BASE_MODEL_ID,
@@ -492,7 +617,7 @@ def load_model_bundle(
         reference = _resolve_cached_snapshot(
             reference_spec, Path(cache_dir), resolved_dependencies
         )
-        _validate_refined_tokenizer_equivalence(
+        refined_tokenizer = _validate_refined_tokenizer_equivalence(
             validated.directory, reference, resolved_dependencies
         )
     return _load_pretrained_directory(
@@ -502,6 +627,7 @@ def load_model_bundle(
         tokenizer_fingerprint=EXPECTED_TOKENIZER_FINGERPRINT,
         artifact_manifest=validated.manifest,
         dependencies=resolved_dependencies,
+        prevalidated_tokenizer=refined_tokenizer,
     )
 
 
