@@ -255,8 +255,8 @@ def _load_raw_tokenizer_backend(
     source_label = "refinado" if source == "refined" else "upstream pinado"
     path = Path(directory) / "tokenizer.json"
     try:
-        mode = path.lstat().st_mode
-        if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+        mode = path.lstat().st_mode if source == "refined" else path.stat().st_mode
+        if (source == "refined" and stat.S_ISLNK(mode)) or not stat.S_ISREG(mode):
             raise ModelLoadError(
                 f"backend bruto do tokenizador {source_label} é inválido"
             )
@@ -282,6 +282,14 @@ def _validate_refined_tokenizer_equivalence(
         "trust_remote_code": False,
         "use_fast": True,
     }
+    try:
+        reference_fingerprint = _tokenizer_fingerprint(reference_directory)
+    except ModelArtifactError as error:
+        raise ModelLoadError(
+            "tokenizador upstream pinado não pode ser validado offline"
+        ) from error
+    if reference_fingerprint != EXPECTED_TOKENIZER_FINGERPRINT:
+        raise ModelLoadError("tokenizador upstream pinado em cache é incompatível")
     _validate_refined_tokenizer_config(artifact_directory)
     artifact = _load_raw_tokenizer_backend(
         artifact_directory,

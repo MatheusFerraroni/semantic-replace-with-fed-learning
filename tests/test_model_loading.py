@@ -699,11 +699,15 @@ class ModelLoadingTests(unittest.TestCase):
                 runtime_tokenizer
             )
 
-            validated = model_loading._validate_refined_tokenizer_equivalence(
-                artifact,
-                reference,
-                dependencies,
-            )
+            with mock.patch(
+                "federated_leakage.model_loading._tokenizer_fingerprint",
+                return_value=EXPECTED_TOKENIZER_FINGERPRINT,
+            ):
+                validated = model_loading._validate_refined_tokenizer_equivalence(
+                    artifact,
+                    reference,
+                    dependencies,
+                )
 
         self.assertIs(validated, runtime_tokenizer)
         self.assertEqual(
@@ -740,7 +744,13 @@ class ModelLoadingTests(unittest.TestCase):
                 artifact,
                 tokenizer_class="classe-arbitraria",
             )
-            with self.assertRaisesRegex(ModelLoadError, "configuração semântica"):
+            with (
+                mock.patch(
+                    "federated_leakage.model_loading._tokenizer_fingerprint",
+                    return_value=EXPECTED_TOKENIZER_FINGERPRINT,
+                ),
+                self.assertRaisesRegex(ModelLoadError, "configuração semântica"),
+            ):
                 model_loading._validate_refined_tokenizer_equivalence(
                     artifact,
                     reference,
@@ -769,12 +779,74 @@ class ModelLoadingTests(unittest.TestCase):
                     dependencies.tokenizers.Tokenizer.from_file = mock.Mock(
                         side_effect=(artifact_raw, raw)
                     )
-                    with self.assertRaisesRegex(ModelLoadError, expected_error):
+                    with (
+                        mock.patch(
+                            "federated_leakage.model_loading._tokenizer_fingerprint",
+                            return_value=EXPECTED_TOKENIZER_FINGERPRINT,
+                        ),
+                        self.assertRaisesRegex(ModelLoadError, expected_error),
+                    ):
                         model_loading._validate_refined_tokenizer_equivalence(
                             artifact,
                             reference,
                             dependencies,
                         )
+
+    def test_refined_tokenizer_accepts_symlink_only_for_pinned_hf_cache(self):
+        if not hasattr(os, "symlink"):
+            self.skipTest("plataforma sem suporte a symlink")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            blob = root / "blob.json"
+            blob.write_text("{}", encoding="utf-8")
+            refined = root / "refined"
+            upstream = root / "upstream"
+            refined.mkdir()
+            upstream.mkdir()
+            os.symlink(blob, refined / "tokenizer.json")
+            os.symlink(blob, upstream / "tokenizer.json")
+            raw = _FakeRawTokenizer()
+            dependencies = _fake_dependencies(upstream)
+            from_file = mock.Mock(return_value=raw)
+            dependencies.tokenizers.Tokenizer.from_file = from_file
+
+            loaded = model_loading._load_raw_tokenizer_backend(
+                upstream,
+                dependencies,
+                source="upstream",
+            )
+            self.assertIs(loaded, raw)
+            with self.assertRaisesRegex(ModelLoadError, "refinado.*inválido"):
+                model_loading._load_raw_tokenizer_backend(
+                    refined,
+                    dependencies,
+                    source="refined",
+                )
+
+        from_file.assert_called_once_with(str(upstream / "tokenizer.json"))
+
+    def test_refined_tokenizer_rejects_wrong_pinned_cache_fingerprint_first(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            artifact = root / "artifact"
+            reference = root / "reference"
+            artifact.mkdir()
+            reference.mkdir()
+            _write_refined_tokenizer_files(artifact)
+            dependencies = _fake_dependencies(reference)
+            with (
+                mock.patch(
+                    "federated_leakage.model_loading._tokenizer_fingerprint",
+                    return_value="0" * 64,
+                ),
+                self.assertRaisesRegex(ModelLoadError, "cache é incompatível"),
+            ):
+                model_loading._validate_refined_tokenizer_equivalence(
+                    artifact,
+                    reference,
+                    dependencies,
+                )
+        dependencies.transformers.AutoTokenizer.from_pretrained.assert_not_called()
 
     def test_prevalidated_tokenizer_avoids_transformers_artifact_dispatch(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
