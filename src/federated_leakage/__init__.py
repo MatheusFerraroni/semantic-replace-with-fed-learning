@@ -203,6 +203,18 @@ from .reproducibility import (
     ReproducibilityEnvironmentError,
     validate_cuda_reproducibility_environment,
 )
+from .runtime_profile import (
+    EXECUTION_RUNTIME_PROFILE_SCHEMA_VERSION,
+    RUNTIME_MANIFEST_SCHEMA_VERSION,
+    ExecutionRuntimeError,
+    ExecutionRuntimeFingerprint,
+    ExecutionRuntimeSpec,
+    capture_execution_runtime,
+    load_execution_runtime_spec,
+    publish_runtime_manifest,
+    runtime_output_root,
+    validate_runtime_manifest,
+)
 from .model_fingerprint import fingerprint_model_parameters
 from .local_training import (
     mean_conversation_causal_loss,
@@ -567,6 +579,16 @@ __all__ = [
     "restore_model_parameter_snapshot",
     "ReproducibilityEnvironmentError",
     "validate_cuda_reproducibility_environment",
+    "EXECUTION_RUNTIME_PROFILE_SCHEMA_VERSION",
+    "RUNTIME_MANIFEST_SCHEMA_VERSION",
+    "ExecutionRuntimeError",
+    "ExecutionRuntimeFingerprint",
+    "ExecutionRuntimeSpec",
+    "capture_execution_runtime",
+    "load_execution_runtime_spec",
+    "publish_runtime_manifest",
+    "runtime_output_root",
+    "validate_runtime_manifest",
     "CALIBRATION_REPETITIONS",
     "CALIBRATION_FIXED_REPETITIONS",
     "CALIBRATION_LEARNING_RATE_ARMS",

@@ -637,6 +637,38 @@ python -m federated_leakage.summarize_refined_defense_pilot \
   --output-root outputs
 ```
 
+Uma réplica operacional independente pode usar a RTX PRO 6000 Blackwell sem
+alterar a `.venv`, o launcher L40S ou qualquer configuração científica. No
+headnode, prepare uma única vez o ambiente CUDA 12.8:
+
+```bash
+scripts/prepare_rtxpro6000_cu128_env.sh
+```
+
+O preparador publica `.venv-rtxpro6000-cu128/` somente depois de validar
+`torch==2.7.1+cu128`, `sm_120`, Opacus e `pip check`. Na fila Blackwell, use job
+names próprios:
+
+```bash
+sbatch --job-name=refined-defense-rtxpro6000-s101-v1 \
+  scripts/run_refined_defense_pilot_rtxpro6000.sbatch preflight 101
+sbatch --job-name=refined-defense-rtxpro6000-s361506353-v1 \
+  scripts/run_refined_defense_pilot_rtxpro6000.sbatch preflight 361506353
+```
+
+`start` e `resume` usam exclusivamente
+`outputs/execution-profiles/rtxpro6000-blackwell-cu128-v1/`; portanto não leem
+nem sobrescrevem checkpoints ou resultados em `outputs/runs/`. Após concluir e
+resumir separadamente as duas execuções, compare os hardwares sem combinar
+médias:
+
+```bash
+python -m federated_leakage.summarize_refined_defense_pilot \
+  --output-root outputs/execution-profiles/rtxpro6000-blackwell-cu128-v1
+python -m federated_leakage.summarize_refined_runtime_replication \
+  --output-root outputs
+```
+
 Consulte [`docs/refined-dp-pilot.md`](docs/refined-dp-pilot.md) para gates,
 checkpoints e critérios de classificação.
 

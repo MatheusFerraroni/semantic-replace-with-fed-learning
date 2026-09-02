@@ -121,3 +121,88 @@ python -m federated_leakage.summarize_refined_defense_pilot \
 Os totais esperados são 16 trajetórias, 320 rodadas, 328.000 passos, 122.086
 gerações greedy e 9.000 avaliações de utilidade. A contagem privada de
 apresentações não é fixada: o resultado registra as seleções Poisson realizadas.
+
+## Réplica RTX PRO 6000 Blackwell
+
+A L40S permanece a referência. A RTX PRO 6000 é uma réplica operacional
+independente com exatamente os mesmos arquivos `main-v5.yaml` e
+`refined-defense-pilot-v1.yaml`. Ela não usa a `.venv` da L40S e não compartilha
+diretórios de run.
+
+No headnode, fora de uma alocação Slurm:
+
+```bash
+cd /caminho/do/repositorio
+scripts/prepare_rtxpro6000_cu128_env.sh
+```
+
+O ambiente `.venv-rtxpro6000-cu128/` fixa PyTorch `2.7.1+cu128`. O preparador
+usa staging, recusa sobrescrita e, quando o ambiente já existe, apenas o
+revalida. O perfil `execution-runtime-profile/v1` exige uma única
+`NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition`, compute capability
+12.0, ao menos 90 GiB, BF16 e `sm_120` presente no build do PyTorch.
+
+Execute os smokes de 1 e 100 passos dentro de uma alocação RTX usando o novo
+Python:
+
+```bash
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export TOKENIZERS_PARALLELISM=false
+
+.venv-rtxpro6000-cu128/bin/python \
+  -m federated_leakage.validate_rtxpro6000_runtime
+
+for STEPS in 1 100; do
+  .venv-rtxpro6000-cu128/bin/python \
+    -m federated_leakage.smoke_private_training \
+    --config configs/main-v5.yaml \
+    --model-artifact-dir "$PWD/artifacts/models/ae3238fde6675942cac5" \
+    --cache-dir artifacts/huggingface --device cuda --seed 101 \
+    --epsilon 3 --steps "$STEPS"
+done
+```
+
+Os hashes das agendas Poisson e de ruído devem ser os mesmos já observados na
+L40S. Depois submeta os preflights:
+
+```bash
+sbatch --job-name=refined-defense-rtxpro6000-s101-v1 \
+  scripts/run_refined_defense_pilot_rtxpro6000.sbatch preflight 101
+sbatch --job-name=refined-defense-rtxpro6000-s361506353-v1 \
+  scripts/run_refined_defense_pilot_rtxpro6000.sbatch preflight 361506353
+```
+
+Substitua `preflight` por `start` somente após ambos passarem. Use `resume` após
+timeout ou liberação do gate par. O launcher valida o runtime antes de carregar
+o modelo e usa exclusivamente:
+
+```text
+outputs/execution-profiles/rtxpro6000-blackwell-cu128-v1/
+├── runtime_manifest.json
+└── runs/
+```
+
+O preflight não cria esse diretório. No `start`, o manifesto é publicado de
+forma atômica; duas seeds concorrentes somente o aceitam se o conteúdo for
+idêntico. Uma retomada rejeita mudança de driver, versões, arquiteturas CUDA,
+GPU ou variáveis de reprodutibilidade. Cache e artefato do modelo são somente
+leitura e podem ser compartilhados com a L40S; journals, checkpoints,
+auditorias e resultados não podem.
+
+Após as duas seeds, gere primeiro o resumo próprio da RTX e depois a comparação:
+
+```bash
+.venv-rtxpro6000-cu128/bin/python \
+  -m federated_leakage.summarize_refined_defense_pilot \
+  --output-root outputs/execution-profiles/rtxpro6000-blackwell-cu128-v1
+
+.venv-rtxpro6000-cu128/bin/python \
+  -m federated_leakage.summarize_refined_runtime_replication \
+  --output-root outputs
+```
+
+A comparação registra resultados por hardware e classifica as conclusões como
+`consistent` ou `runtime_sensitive`. Ela nunca combina médias nem promove a
+réplica sobre a referência.

@@ -2,6 +2,8 @@
 
 # Local environments and credentials
 .venv/
+.venv-rtxpro6000-cu128/
+.venv-rtxpro6000-cu128.staging-*/
 .env
 .env.*
 !.env.example

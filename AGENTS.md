@@ -293,6 +293,13 @@ todos os parâmetros do Tucano 2 0.6B.
   seed, modos `preflight`, `start` ou `resume`, uma L40S, ambiente offline,
   Opacus `1.6.0` e retomada manual. Executar primeiro smokes reais de 1 e 100
   passos privados; incompatibilidade de hooks ou OOM deve falhar sem fallback.
+- Tratar a RTX PRO 6000 Blackwell somente como réplica de hardware independente
+  da L40S. Usar `.venv-rtxpro6000-cu128`, PyTorch `2.7.1+cu128`, perfil
+  `execution-runtime-profile/v1` e o launcher
+  `scripts/run_refined_defense_pilot_rtxpro6000.sbatch`. Manter todos os seus
+  manifestos, checkpoints, auditorias e resultados em
+  `outputs/execution-profiles/rtxpro6000-blackwell-cu128-v1/`; nunca retomar ou
+  sobrescrever `outputs/runs/` e nunca combinar médias entre hardwares.
 - Não alterar pressupostos experimentais silenciosamente. Registrar mudanças no
   protocolo, README ou configuração da execução.
 - Relatar privacidade e utilidade juntas, inclusive resultados negativos e

@@ -1,0 +1,31 @@
+schema_version: execution-runtime-profile/v1
+profile_id: rtxpro6000-blackwell-cu128-v1
+scientific_config: refined-defense-pilot-v1.yaml
+scientific_config_sha256: ad3407a8be18fe5a3341ce6dbbdfa2e52ad69babc208c3fd41b6b378d10ce7cc
+main_config: main-v5.yaml
+main_config_sha256: f4e55ba5cda848cd5bfcbd47a0520219fe042747d132563e576eba9e87d21e4a
+output_namespace: execution-profiles/rtxpro6000-blackwell-cu128-v1
+python_version: "3.12"
+torch_version: 2.7.1+cu128
+torch_cuda_version: "12.8"
+required_cuda_arch: sm_120
+hardware:
+  gpu_name: NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition
+  compute_capability: [12, 0]
+  minimum_vram_gib: 90
+  visible_gpu_count: 1
+  bf16_required: true
+dependencies:
+  Faker: 40.36.0
+  huggingface-hub: 0.33.4
+  jsonschema: 4.25.0
+  opacus: 1.6.0
+  PyYAML: 6.0.2
+  safetensors: 0.5.3
+  tokenizers: 0.21.2
+  transformers: 4.53.2
+reproducibility:
+  cuda_cublas_workspace_config: ":4096:8"
+  hf_hub_offline: "1"
+  transformers_offline: "1"
+  tokenizers_parallelism: "false"

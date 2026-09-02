@@ -563,6 +563,15 @@ aplicável e checkpoint. As rodadas 1, 10 e 20 são permanentes; as demais usam 
 único checkpoint móvel. Consulte
 [`refined-dp-pilot.md`](refined-dp-pilot.md) para comandos e totais.
 
+A execução de referência permanece na L40S. Uma réplica Blackwell pode executar
+o mesmo contrato científico sob `execution-runtime-profile/v1`, com PyTorch
+`2.7.1+cu128` e `sm_120`, mas deve usar ambiente, manifesto, job names,
+checkpoints, auditorias e resumos próprios. A réplica fica sob
+`outputs/execution-profiles/rtxpro6000-blackwell-cu128-v1/` e nunca retoma
+artefatos de `outputs/runs/`. Diferenças numéricas entre hardwares são relatadas
+separadamente como sensibilidade ao runtime; não se combinam médias e a réplica
+não substitui automaticamente a referência.
+
 ## 8. Auditoria
 
 O núcleo central descrito nas seções 8.1–8.3 está implementado para B0 e
