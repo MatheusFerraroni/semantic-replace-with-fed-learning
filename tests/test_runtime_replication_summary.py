@@ -4,8 +4,10 @@ from pathlib import Path
 from unittest import mock
 
 from federated_leakage.summarize_refined_runtime_replication import (
+    _epsilon_statuses,
     build_refined_runtime_comparison,
 )
+from federated_leakage.refined_pilot_contracts import RefinedPilotError
 
 
 def _hardware(status="approved"):
@@ -43,6 +45,19 @@ def _hardware(status="approved"):
 
 
 class RuntimeReplicationSummaryTests(unittest.TestCase):
+    def test_dp_statuses_accept_json_lists_and_reader_tuples(self):
+        entries = ((3.0, "approved", 0.95, 0.95), (8.0, "approved", 0.91, 0.91))
+        for outer in (list, tuple):
+            for inner in (list, tuple):
+                with self.subTest(outer=outer, inner=inner):
+                    self.assertEqual(
+                        _epsilon_statuses({"epsilon_statuses": outer(inner(item) for item in entries)}),
+                        {"3.0": "approved", "8.0": "approved"},
+                    )
+        for invalid in ((), (entries[0],), (entries[0], entries[0]), (entries[0][:3], entries[1])):
+            with self.subTest(invalid=invalid), self.assertRaises(RefinedPilotError):
+                _epsilon_statuses({"epsilon_statuses": invalid})
+
     def test_classifies_without_combining_hardware_metrics(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

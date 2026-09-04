@@ -122,6 +122,14 @@ Os totais esperados são 16 trajetórias, 320 rodadas, 328.000 passos, 122.086
 gerações greedy e 9.000 avaliações de utilidade. A contagem privada de
 apresentações não é fixada: o resultado registra as seleções Poisson realizadas.
 
+A consolidação pode ser executada no headnode, sem GPU ou retreinamento. Ao
+revalidar `perplexidade = exp(NLL)`, o leitor admite diferença de até 2 ULP do
+valor recalculado, devido a variações da biblioteca matemática entre máquinas.
+Isso não modifica a perplexidade salva: hashes científicos e hashes dos
+resultados continuam sendo verificados exatamente sobre os valores originais.
+O consolidador aceita listas JSON e as tuplas reconstruídas pelo leitor para os
+dois orçamentos DP, preservando as verificações de estrutura e orçamento.
+
 ## Réplica RTX PRO 6000 Blackwell
 
 A L40S permanece a referência. A RTX PRO 6000 é uma réplica operacional

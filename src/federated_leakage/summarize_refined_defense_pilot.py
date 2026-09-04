@@ -49,11 +49,11 @@ def build_refined_combined_result(output_root: Path = Path("outputs")) -> dict[s
     for seed, source in sources.items():
         defense = source["defense"]
         entries = defense.get("epsilon_statuses")
-        if not isinstance(entries, list) or len(entries) != 2:
+        if not isinstance(entries, (list, tuple)) or len(entries) != 2:
             raise RefinedPilotError("status DP persistido é inválido")
         parsed = {}
         for entry in entries:
-            if not isinstance(entry, list) or len(entry) != 4:
+            if not isinstance(entry, (list, tuple)) or len(entry) != 4:
                 raise RefinedPilotError("status DP persistido é inválido")
             parsed[f"{float(entry[0]):.1f}"] = str(entry[1])
         if set(parsed) != {"3.0", "8.0"}:

@@ -42,6 +42,9 @@ UTILITY_SEMANTIC_CHECKPOINTS = (
     "F5-round-020",
 )
 UTILITY_EXPERIMENT_SEEDS = (101, 361506353)
+# Tolerância apenas na revalidação de exp(NLL) entre implementações de libm.
+# Os valores persistidos e seu hash científico continuam sendo exatos.
+UTILITY_PERPLEXITY_MAX_ULPS = 2
 
 
 class UtilityEvaluationError(RuntimeError):
@@ -369,7 +372,8 @@ def validate_utility_evaluation_result(
         or result.supervised_token_count <= 0
         or any(not math.isfinite(value) for value in metrics)
         or any(value < 0 for value in metrics)
-        or result.perplexity != expected_perplexity
+        or abs(result.perplexity - expected_perplexity)
+        > UTILITY_PERPLEXITY_MAX_ULPS * math.ulp(expected_perplexity)
         or result.peak_device_memory_bytes is not None
         and (
             type(result.peak_device_memory_bytes) is not int

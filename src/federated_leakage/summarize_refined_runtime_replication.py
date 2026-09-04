@@ -31,11 +31,11 @@ RUNTIME_COMPARISON_ID = "refined-defense-l40s-vs-rtxpro6000-cu128-v1"
 
 def _epsilon_statuses(defense: Mapping[str, Any]) -> dict[str, str]:
     entries = defense.get("epsilon_statuses")
-    if not isinstance(entries, list) or len(entries) != 2:
+    if not isinstance(entries, (list, tuple)) or len(entries) != 2:
         raise RefinedPilotError("status DP do resultado é inválido")
     result: dict[str, str] = {}
     for entry in entries:
-        if not isinstance(entry, list) or len(entry) != 4:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 4:
             raise RefinedPilotError("status DP do resultado é inválido")
         result[f"{float(entry[0]):.1f}"] = str(entry[1])
     if set(result) != {"3.0", "8.0"}:
