@@ -1,0 +1,54 @@
+schema_version: federated-memorization-grid/v2
+main_config: main-v3.yaml
+main_config_sha256: b5bde98b847e18927121c7f57d049d704f339d251b6f75c30b98fc692569fc2e
+experiment_seeds: [101, 361506353]
+default_run_ids:
+  "101": federated-memorization-grid-seed-101-v2
+  "361506353": federated-memorization-grid-seed-361506353-v2
+dataset_ids:
+  "101": federated-memorization-grid-seed-101-v2-dataset-v4
+  "361506353": federated-memorization-grid-seed-361506353-v2-dataset-v4
+schedule_id: F0-F1
+scenario: F0
+auxiliary_weight_units: 1
+rounds: 20
+auxiliary_learning_rate_millionths: 30
+auxiliary_repetition_multiplier: 1
+victim_grid:
+  learning_rate_millionths: [30, 100]
+  repetition_multipliers: [4, 8, 16]
+audit_target_count: 200
+intense_gate:
+  distinctive_exact_pairs: 50
+  distinctive_entities: 25
+  distinctive_field_types: 2
+expected_totals_per_seed:
+  arms: 6
+  federated_rounds: 120
+  conversation_presentations: 1132000
+  optimizer_steps: 283000
+  audit_generations: 12607
+  utility_conversations: 3500
+expected_totals_combined:
+  arms: 12
+  federated_rounds: 240
+  conversation_presentations: 2264000
+  optimizer_steps: 566000
+  audit_generations: 25214
+  utility_conversations: 7000
+expected_hashes:
+  "101":
+    victim_dataset_sha256: 7d08d2dfc889162227d4a87dfbec60766ae2fe6b0497b27733ce512ae861f3bb
+    benign_schedule_sha256: 1be2d55566a92bd613e31d20243bbb3555a859cf3427c1a9db44af096be78050
+    utility_dataset_sha256: a06fd9b76a1dad40192f2c167ccfff81c1a55ab3ced93cf18daca270933e1f1d
+  "361506353":
+    victim_dataset_sha256: 7ca28596cabcbce705d48d3c841a1cf8148c25ec7cbbf4b45a3c6e2df3e97dc0
+    benign_schedule_sha256: 97e9a0d6cf636477dae4577c5b39fd5291a7b097826f1c9ff061dab1ca3dcfb8
+    utility_dataset_sha256: f6332605986244161cb25c87baf6a374f1711408cfb99c52f4b317021c9fab3c
+reference_v1:
+  run_id: federated-memorization-calibration-seed-101-v1
+  config_sha256: 89237c8358e574c0185ec7eeb537676f2773a599390f760f8d823e493805950c
+  result_sha256: 6ecb06f1fa5c5090015e9e6a45f680c6d3f428d1d23b12b7e8211e1d80a6c5c3
+  final_model_sha256: 4ed1d34bb3e0bf15e07e5a8f6bcfd9dcc52fb5ff5939b25d76d0183fbed90486
+  distinctive_exact_pairs: 15
+  distinctive_entities: 15

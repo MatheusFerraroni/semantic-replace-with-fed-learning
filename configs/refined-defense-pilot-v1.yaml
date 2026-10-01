@@ -1,0 +1,77 @@
+schema_version: refined-defense-pilot/v1
+main_config: main-v5.yaml
+main_config_sha256: f4e55ba5cda848cd5bfcbd47a0520219fe042747d132563e576eba9e87d21e4a
+experiment_seeds: [101, 361506353]
+default_run_ids:
+  "101": refined-defense-forum-tech-seed-101-v1
+  "361506353": refined-defense-forum-tech-seed-361506353-v1
+schedule_id: F0-F1
+scenario_order:
+  - F0
+  - F1
+  - F2-epsilon-3
+  - F3-epsilon-3
+  - F2-epsilon-8
+  - F3-epsilon-8
+  - F4
+  - F5
+rounds: 20
+auxiliary_weight_units: 1
+refined_model:
+  contract_profile: queroquero-export-v1
+  artifact_id: ae3238fde6675942cac5
+  archive_sha256: 7f523ee9fa73f085ed3cd16ca37c86f45fb2c5aa1b0cff63aab4718c7aa77bc0
+  manifest_sha256: 4b91721b07dc82d47fef2aaf898b4cae2322ca617cd99a2cb903a13965574a48
+  artifact_sha256: 74046c639049eb76c58696127c469a24ecf8f0637b640d64fa9ab2072f269627
+  weights_sha256: 3c935258a769c800b89c1c0e4006b45bcef9e470f84d93c7362c3dd79c3cccac
+  training_arm: forum_tech
+  optimizer_steps: 52000
+training:
+  victim_learning_rate: 0.0001
+  victim_repetitions: 4
+  victim_optimizer_steps_per_round: 100
+  auxiliary_learning_rate: 0.00003
+  auxiliary_repetitions: 1
+  auxiliary_optimizer_steps_per_round: 25
+dp:
+  target_epsilons: [3.0, 8.0]
+  privacy_unit: conversation
+  participant_level_dp_claim: false
+  private_steps_per_client_round: 100
+  private_steps_per_client_total: 2000
+  require_hooks: true
+  secure_mode: false
+audit:
+  baseline_target_count: 200
+  round_target_count: 20
+  endpoint_target_count: 200
+  decoding_strategy: tokenwise_greedy_argmax/v1
+vulnerability_gate:
+  distinctive_exact_pairs: 50
+  distinctive_entities: 25
+  distinctive_field_types: 2
+  require_both_seeds: true
+defense_gate:
+  minimum_original_exact_pair_reduction: 0.90
+  maximum_original_complete_profiles: 0
+utility:
+  conversation_count: 500
+  checkpoints_per_seed: 9
+expected_totals_per_seed:
+  trajectories: 8
+  federated_rounds: 160
+  optimizer_steps: 164000
+  non_private_conversation_presentations: 328000
+  audit_generations: 61043
+  utility_conversations: 4500
+expected_totals_combined:
+  trajectories: 16
+  federated_rounds: 320
+  optimizer_steps: 328000
+  non_private_conversation_presentations: 656000
+  audit_generations: 122086
+  utility_conversations: 9000
+checkpointing:
+  retained_rounds: [1, 10, 20]
+  rolling_resume_checkpoint: true
+  incomplete_round_policy: replay

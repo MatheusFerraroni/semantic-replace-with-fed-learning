@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://federated-leakage.invalid/schemas/model-artifact-v1.schema.json",
+  "title": "Tucano 2 model artifact manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_id",
+    "format",
+    "parent_model",
+    "architecture",
+    "tokenizer",
+    "training",
+    "environment",
+    "files",
+    "artifact_sha256",
+    "redistribution_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "tucano2-model-artifact/v1"
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "format": {
+      "const": "transformers_pretrained"
+    },
+    "parent_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "revision", "license"],
+      "properties": {
+        "model_id": {"const": "Polygl0t/Tucano2-0.6B-Base"},
+        "revision": {"const": "dad97dc864a8f9a1d240fb9351d098f3af9511d7"},
+        "license": {"const": "Apache-2.0"}
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_type",
+        "parameter_count",
+        "native_context_length",
+        "training_sequence_length"
+      ],
+      "properties": {
+        "model_type": {"const": "llama"},
+        "parameter_count": {"const": 670127616},
+        "native_context_length": {"const": 4096},
+        "training_sequence_length": {"const": 1024}
+      }
+    },
+    "tokenizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fingerprint_sha256",
+        "files",
+        "vocab_size",
+        "bos_token_id",
+        "eos_token_id",
+        "pad_token_id",
+        "unk_token_id"
+      ],
+      "properties": {
+        "fingerprint_sha256": {
+          "const": "069e8fecbf6a1e7adc2941a53408306827516f11418998a295e2c4d0e24d3ae7"
+        },
+        "files": {
+          "const": [
+            "added_tokens.json",
+            "special_tokens_map.json",
+            "tokenizer.json",
+            "tokenizer_config.json"
+          ]
+        },
+        "vocab_size": {"const": 49152},
+        "bos_token_id": {"const": 1},
+        "eos_token_id": {"const": 2},
+        "pad_token_id": {"const": 49109},
+        "unk_token_id": {"const": 0}
+      }
+    },
+    "training": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "producer_git_commit",
+        "run_id",
+        "seed",
+        "resolved_config_sha256",
+        "dataset_manifest_sha256"
+      ],
+      "properties": {
+        "method": {"const": "full_parameter_continual_pretraining"},
+        "producer_git_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "seed": {"type": "integer", "minimum": 0},
+        "resolved_config_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "dataset_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "torch", "transformers", "tokenizers"],
+      "properties": {
+        "python": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"},
+        "torch": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"},
+        "transformers": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"},
+        "tokenizers": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"}
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "size_bytes", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "size_bytes": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "artifact_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "redistribution_status": {
+      "const": "internal_research_only"
+    }
+  }
+}

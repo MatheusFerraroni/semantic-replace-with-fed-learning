@@ -1,0 +1,6 @@
+# Substitua o hash somente pelo artifact_sha256 validado do artefato refinado.
+model:
+  kind: local_artifact
+  expected_schema: tucano2-model-artifact/v1
+  expected_artifact_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  max_sequence_length: 1024
